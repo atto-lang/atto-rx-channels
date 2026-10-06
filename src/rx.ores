@@ -103,7 +103,12 @@ pub define class ChannelSubscription<T> extends Subscription<T> as
   }
 
   pub pull(): Option<T> {
-    val selected = await (nb select first from self.cases);
+    val Option<SelectResult> selected_option =
+        await (nb select first from self.cases);
+    if selected_option.is_none(); then
+      return None;
+    fi
+    val SelectResult selected = selected_option.unwrap();
     val int index = selected.index;
     if index == 0; then
       return None;
@@ -326,7 +331,12 @@ pub define class MergeSubscription<T> extends Subscription<T> as
       elif right_done; then
         cases = self.left_only;
       fi
-      val selected = await (nb select from cases);
+      val Option<SelectResult> selected_option =
+          await (nb select from cases);
+      if selected_option.is_none(); then
+        return None;
+      fi
+      val SelectResult selected = selected_option.unwrap();
       val int index = selected.index;
       if index == 0; then
         return None;
