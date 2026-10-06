@@ -1,6 +1,6 @@
 # rx-oreslang-channels
 
-A userland reactive stream library written in **Oreslang**. It uses bounded/rendezvous channels, `readch`, `nb writech`, `try` probes, dynamic `select`/`nb select`, and `await`. It has no dependency on `std/rx` and adds no Java reactive implementation.
+A userland reactive stream library written in **Oreslang**. It uses bounded/rendezvous channels, `readch`, `nb writech`, `try` probes, dynamic `select`/`nb select`, and `await`. `src/rx.ores` is a plain file/code unit, not a synthetic package or module wrapper; callers import the file with `import * as ...` and/or select declarations by relative path. It has no dependency on `std/rx` and adds no Java reactive implementation.
 
 This library lives outside core/std-lib. The core rx-ores implementation can evolve independently while this version exercises Oreslang's channel and source-frame suspension APIs.
 
@@ -21,7 +21,7 @@ You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/c
 ## Channel source with async/await
 
 ```ores
-import module rx_channels from './src/rx.ores';
+import * as rx_channels from './src/rx.ores';
 import class Observable, Subscription from './src/rx.ores';
 
 pub async fnc main(): void {
@@ -86,7 +86,7 @@ val Fnc<&int, bool> even = |x| -> {
 - Future sources retain the producer's lifetime. Cancelling an adapter does not cancel its shared Future; an already pending Future pull waits for settlement and then discards its value if cancelled. Channel sources are the adapter for prompt cancellation of a pending read.
 - Operator/Future failures propagate through source suspension; they are not emitted as data or mistaken for normal completion. Ordinary guest failures use `Result.expect` because this compiler has no guest `throw`/rethrow statement. `finally` clears demand and disposes upstream even when a language panic bypasses `catch`.
 - Replay with `from_values` is intended for immutable/copyable payloads. Use a single-consumer channel for owned mutable payloads; replay does not deep-copy objects.
-- Channels and subscriptions stay in their execution domain. They cannot cross actor mailboxes; use ActorRef/mailbox protocols for actor-to-actor transport. Structured actor cancellation remains runtime-owned.
+- Channels and subscriptions stay in their execution domain. They cannot cross actor mailboxes; use ActorRef/mailbox protocols for actor-to-actor transport. Function/closure values are deliberately not channel payloads: callbacks remain local and channels carry data. Structured actor cancellation remains runtime-owned.
 
 This is an initial pull-oriented implementation, not complete Rx operator parity. Timed operators, multicast subjects, variadic merge, and shared-Future cancellation need additional work.
 
