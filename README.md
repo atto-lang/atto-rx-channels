@@ -99,3 +99,12 @@ This is an initial pull-oriented implementation, not complete Rx operator parity
 ## Validation
 
 The test runner type/ownership-checks the library, examples, and every test program, then executes each with a timeout and checks exact output or an expected failure. Coverage includes replay, completion ordering, operator composition, cancellation/idempotence, no prefetch, fair merge with unequal input lengths, rendezvous backpressure, Future adaptation, upstream failure, and invalid take counts. The [CI template](ci/test.workflow.yml) builds the pinned compiler and runs the same suite. Copy it to `.github/workflows/test.yml` using credentials with workflow write permission to activate it. The connected GitHub OAuth token lacks that scope, so the template is preserved outside the workflow directory. Because the compiler repository is private, CI requires an `ORES_COMPILER_READ_TOKEN` repository secret with read-only access to `oreslang-source.java`; the default workflow token cannot read a different private repository. The workflow fails explicitly when this secret is absent. Local validation uses your existing Git authentication.
+
+## Cross-variant benchmark
+
+`bench/pipeline.ores` runs the same repeated finite pipeline as `rx-ores` and
+`rx-ores-callbacks`. The central benchmark driver lives in
+`rx-ores/bench/benchmark.py` and reports pipelines/sec plus estimated
+ns/source-item after warmup. The channel implementation deliberately retains its
+channel-backed cursor/marker/select machinery so the measurement reflects the
+actual architecture rather than a benchmark-only shortcut.
