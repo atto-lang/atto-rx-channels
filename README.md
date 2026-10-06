@@ -2,7 +2,9 @@
 
 A userland reactive stream library written in **Oreslang**. It uses bounded/rendezvous channels, `readch`, `nb writech`, `try` probes, dynamic `select`/`nb select`, and `await`. It has no dependency on `std/rx` and adds no Java reactive implementation.
 
-This library lives outside core/std-lib. The core rx-ores implementation can evolve independently while this version exercises Oreslang's channel and source-frame suspension APIs.
+This library lives outside core/std-lib. `src/rx.ores` is an ordinary file, not a package or implicit module declaration. Consumers import the file namespace (for example `import * as rx_channels from './src/rx.ores';`) or explicit declarations from its relative path. Named `define module ... as/end` blocks remain available inside files when a real module namespace is desired.
+
+The core rx-ores implementation can evolve independently while this version exercises Oreslang's channel and source-frame suspension APIs.
 
 ## Run
 
@@ -21,7 +23,7 @@ You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/c
 ## Channel source with async/await
 
 ```ores
-import module rx_channels from './src/rx.ores';
+import * as rx_channels from './src/rx.ores';
 import class Observable, Subscription from './src/rx.ores';
 
 pub async fnc main(): void {
@@ -74,6 +76,12 @@ val Fnc<&int, bool> even = |x| -> {
   return value % 2 == 0;
 };
 ```
+
+## Channel payload contract
+
+Channels are data transport, not executable-authority transport. Arbitrary `Fnc`/closure values must not be sent through a `Channel<T>`, including when nested inside `Option`, `Result`, tuples, arrays, or user objects. Closures may capture mutable state, capabilities, actor identity, borrows, or scheduler affinity; moving one through a generic channel would silently create a code/authority-transfer mechanism. Local callbacks are still valid for operators such as `map` and `filter` because those callbacks stay in the owning execution domain and transform data before it is written to a channel.
+
+If Oreslang later needs transferable stateless executable identity, that should be a separate explicit abstraction such as a symbol/function reference with a deliberately restricted capture model—not an arbitrary closure.
 
 ## Stream contract
 
