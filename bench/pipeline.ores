@@ -20,7 +20,7 @@ pub async fnc main(): void {
       if frame.is_none(); then
         break;
       fi
-      checksum = checksum + 1;
+      checksum = checksum + frame.unwrap();
     }
   done
 
