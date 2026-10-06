@@ -1,4 +1,4 @@
-import module rx_channels from '../src/rx.ores';
+import * as rx_channels from '../src/rx.ores';
 import class Observable, Subscription from '../src/rx.ores';
 async fnc failed(): int {
   val Result<int, String> error = Err("boom");
