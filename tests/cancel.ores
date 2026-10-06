@@ -1,4 +1,4 @@
-import module rx_channels from '../src/rx.ores';
+import * as rx_channels from '../src/rx.ores';
 import class Observable, Subscription from '../src/rx.ores';
 pub async fnc main(): void {
   val Channel<Option<int>> input = Channel.new<Option<int>>(2);
