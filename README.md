@@ -14,7 +14,7 @@ source .work/env.sh
 python3 scripts/test.py
 ```
 
-`compiler.lock` pins the exact reference compiler revision. The pinned compiler includes the imported/polymorphic suspension fixes, Option-valued dynamic select/Future chaining, and the data-only channel payload contract refreshed in [oreslang-source.java PR #365](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/365). Setup fetches the exact pinned commit; it does not modify your compiler checkout or any core RX implementation.
+`compiler.lock` pins the exact reference compiler revision. The pinned compiler includes the imported/polymorphic suspension fixes, Option-valued dynamic select/Future chaining, and the data-only channel payload contract refreshed in [oreslang-source.java PR #373](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/373). Setup fetches the exact pinned commit; it does not modify your compiler checkout or any core RX implementation.
 
 You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/classes` plus its Maven dependency classpath. Set `JAVA` to the Java executable if necessary.
 
