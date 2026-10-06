@@ -21,7 +21,7 @@ You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/c
 ## Channel source with async/await
 
 ```ores
-import module rx_channels from './src/rx.ores';
+import * as rx_channels from './src/rx.ores';
 import class Observable, Subscription from './src/rx.ores';
 
 pub async fnc main(): void {
@@ -46,7 +46,7 @@ pub async fnc main(): void {
 
 The reference compiler currently rejects generic `async fnc` declarations and async instance methods. The generic library therefore uses **ordinary methods whose source bodies suspend**. `Subscription.next()` returns `Option<T>` at the source level; call it directly inside a resumable source workflow. `send()` and `complete()` return real `Future<void>` registrations that callers explicitly `await`. `from_future()` adapts an existing Future. See [examples/channel_async.ores](examples/channel_async.ores) and [examples/pipeline.ores](examples/pipeline.ores).
 
-Imports of generic functions currently use the module-qualified direct-call form. Explicit types on imported results retain useful checking across the current import boundary.
+`rx.ores` is a file/code unit, not an implicit package or module. Consumers use `import * as rx_channels from './src/rx.ores'` (or the appropriate relative path) to choose a local namespace for that file root. Explicit `define module ... as ... end` remains available only when the source itself deliberately declares a module namespace inside the file. Explicit types on imported results retain useful checking across the current import boundary.
 
 ## API
 
@@ -74,6 +74,12 @@ val Fnc<&int, bool> even = |x| -> {
   return value % 2 == 0;
 };
 ```
+
+## Channel payload policy
+
+Channels carry **data, not executable authority**. `Fnc`/`Function` values and closures may be used locally by operators such as `map` and `filter`, but they may not be channel element types, including when nested inside `Option`, collections, tuples/records, or user classes. The compiler fails those channel types closed.
+
+A closure can capture mutable state, borrows, capabilities, actor identity, or scheduler affinity. Transporting it through a generic channel would silently make the channel a code/authority-transfer mechanism. If Oreslang later needs transferable stateless code identity, that should be an explicit symbol/`CallableRef`-style value with its own authority contract rather than an arbitrary closure.
 
 ## Stream contract
 
