@@ -1,10 +1,16 @@
-define module rx_channels
 // Pull methods are ordinary source methods with suspending bodies. Generic
 // async callables are not yet supported by the reference compiler.
 
+// Treat a capacity-1 Channel<bool> as an idempotent latch without consuming it.
+//
+// A successful immediate read means the latch was already set. We immediately
+// restore the token so later probes observe the same state. Both operations are
+// try/immediate channel operations, so this helper never suspends or installs a
+// waiter. These marker channels are local subscription state, not stream data.
 fnc marked(Channel<bool> marker): bool {
   val present = try readch marker;
   if present.is_some(); then
+    // Put the marker back: this is a non-destructive state probe.
     try writech marker, true;
     return true;
   fi
@@ -394,4 +400,3 @@ pub fnc first<T>(Observable<T> source): Option<T> {
   sub.cancel();
   return value;
 }
-end
