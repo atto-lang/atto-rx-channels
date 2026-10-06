@@ -1,10 +1,25 @@
-define module rx_channels
+// This file is the RX code unit. It intentionally has no enclosing module.
+// Consumers namespace the file root at the import site, for example:
+//   import * as rx_channels from '../src/rx.ores';
+// Named modules remain available for namespaces declared *inside* a file; the
+// file itself is not implicitly a package or module.
+//
 // Pull methods are ordinary source methods with suspending bodies. Generic
 // async callables are not yet supported by the reference compiler.
 
+// Probe a one-slot sticky marker without blocking or clearing it.
+//
+// A successful `try readch` consumes the marker token, so this helper puts the
+// token straight back before returning true. An empty marker channel means the
+// state has never been marked. This is an observation helper, not a check/set
+// transition: writers use `try writech marker, true`, so the first successful
+// write establishes the sticky state and later writes simply observe a full
+// one-slot channel.
 fnc marked(Channel<bool> marker): bool {
+  // Immediate read: never suspend just to inspect state.
   val present = try readch marker;
   if present.is_some(); then
+    // Restore the token we just consumed so reading the flag is non-destructive.
     try writech marker, true;
     return true;
   fi
@@ -394,4 +409,3 @@ pub fnc first<T>(Observable<T> source): Option<T> {
   sub.cancel();
   return value;
 }
-end
