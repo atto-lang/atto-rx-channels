@@ -1,7 +1,16 @@
-define module rx_channels
 // Pull methods are ordinary source methods with suspending bodies. Generic
 // async callables are not yet supported by the reference compiler.
 
+// Non-destructively test whether a one-slot boolean marker has been set.
+//
+// This helper deliberately uses an immediate read probe instead of a normal
+// read so checking a marker never blocks. If a value is present, it writes the
+// token back before returning true; callers therefore observe a sticky marker
+// rather than consuming it. A missing value means the marker is not set yet.
+//
+// This is used for cancellation/completion/demand flags. It is not a general
+// channel peek operation: it assumes a single logical owner and a marker
+// channel whose payload is only the sentinel true value.
 fnc marked(Channel<bool> marker): bool {
   val present = try readch marker;
   if present.is_some(); then
@@ -394,4 +403,3 @@ pub fnc first<T>(Observable<T> source): Option<T> {
   sub.cancel();
   return value;
 }
-end
