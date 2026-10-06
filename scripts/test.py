@@ -24,6 +24,16 @@ run(['--check', str(ROOT / 'src/rx.ores')])
 for example in sorted((ROOT / 'examples').glob('*.ores')):
     run(['--check', str(example)])
 for path in sorted((ROOT / 'tests').glob('*.ores')):
+    check_error_file = path.with_suffix('.check.err')
+    if check_error_file.exists():
+        result = subprocess.run(COMMAND + ['--check', str(path)], text=True, capture_output=True, timeout=30)
+        expected_check_error = check_error_file.read_text().strip()
+        if result.returncode == 0 or expected_check_error not in result.stderr:
+            sys.exit(f'{path.name}: expected check failure containing {expected_check_error!r}\n'
+                     + result.stdout + result.stderr)
+        print(f'PASS {path.stem} (expected check failure)')
+        continue
+
     run(['--check', str(path)])
     error_file = path.with_suffix('.err')
     if error_file.exists():
