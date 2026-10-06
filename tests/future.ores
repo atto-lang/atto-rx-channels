@@ -1,4 +1,4 @@
-import module rx_channels from '../src/rx.ores';
+import * as rx_channels from '../src/rx.ores';
 import class Observable, Subscription from '../src/rx.ores';
 async fnc answer(): int { return 42; }
 pub async fnc main(): void {
