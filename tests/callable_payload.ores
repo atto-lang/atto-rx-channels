@@ -1,3 +1,8 @@
-fnc bad(Channel<Fnc<int, int>> callbacks): void {
+pub routine main(): void {
+  val Channel<Fnc<int, int>> callbacks = Channel.new<Fnc<int, int>>(1);
+  val Fnc<int, int> twice = |value| -> { return value * 2; };
+  writech callbacks, twice;
+  val Fnc<int, int> received = readch callbacks;
+  stdio.stdout.write(received(21));
   return;
 }
