@@ -77,9 +77,11 @@ val Fnc<&int, bool> even = |x| -> {
 
 ## Channel payload policy
 
-Channels carry **data, not executable authority**. `Fnc`/`Function` values and closures may be used locally by operators such as `map` and `filter`, but they may not be channel element types, including when nested inside `Option`, collections, tuples/records, or user classes. The compiler fails those channel types closed.
+**Execution-domain distinction:** actor mailboxes must never carry raw pointers, borrowed references, executable closures, or live object graphs: messages are serialized/validated and actor-owned. Local `Channel<T>` instances may eventually carry function values, closures, and object references when the compiler proves execution-domain confinement, capture safety, and valid move/borrow lifetimes. Such local channels must never be used to bypass mailbox isolation.
 
-A closure can capture mutable state, borrows, capabilities, actor identity, or scheduler affinity. Transporting it through a generic channel would silently make the channel a code/authority-transfer mechanism. If Oreslang later needs transferable stateless code identity, that should be an explicit symbol/`CallableRef`-style value with its own authority contract rather than an arbitrary closure.
+**Current compatibility:** the compiler version pinned by this PR still rejects callable channel element types transitively; the tests deliberately retain that restriction until the local-only channel mode is implemented and verified in the compiler. A closure can capture mutable state or scheduler authority, so merely removing the ban is unsafe.
+
+**Binding rules:** `const x` is fixed/read-only; `val x` is fixed/mutable (`const mut x`); `let x` is rebindable/read-only; `let mut x` is rebindable/mutable. All mutable operations still require ownership/exclusive borrow. Static select read cases default immutable: `case msg = readch(input) -> { ... }`; `case val msg` permits mutations on owned values without rebinding; `case mut msg` allows rebinding too. Migration is tracked by [compiler PR #411](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/411).
 
 ## Stream contract
 
