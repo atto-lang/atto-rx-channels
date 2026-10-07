@@ -14,7 +14,7 @@ source .work/env.sh
 python3 scripts/test.py
 ```
 
-`compiler.lock` pins the exact reference compiler revision. The pinned compiler includes the imported/polymorphic suspension fixes, Option-valued dynamic select/Future chaining, and the data-only channel payload contract refreshed in [oreslang-source.java PR #373](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/373). Setup fetches the exact pinned commit; it does not modify your compiler checkout or any core RX implementation.
+`compiler.lock` pins the exact reference compiler revision from [oreslang-source.java PR #411](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/411). That compiler includes the orthogonal `const`/`val`/`let`/`mut` contract, binding-first select cases, inferred structs, and execution-domain-local callable channels. Setup fetches that exact commit; it does not modify your compiler checkout or any core RX implementation.
 
 You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/classes` plus its Maven dependency classpath. Set `JAVA` to the Java executable if necessary.
 
@@ -77,9 +77,7 @@ val Fnc<&int, bool> even = |x| -> {
 
 ## Channel payload policy
 
-**Execution-domain distinction:** actor mailboxes must never carry raw pointers, borrowed references, executable closures, or live object graphs: messages are serialized/validated and actor-owned. Local `Channel<T>` instances may eventually carry function values, closures, and object references when the compiler proves execution-domain confinement, capture safety, and valid move/borrow lifetimes. Such local channels must never be used to bypass mailbox isolation.
-
-**Current compatibility:** the compiler version pinned by this PR still rejects callable channel element types transitively; the tests deliberately retain that restriction until the local-only channel mode is implemented and verified in the compiler. A closure can capture mutable state or scheduler authority, so merely removing the ban is unsafe.
+**Execution-domain distinction:** actor mailboxes never carry raw pointers, borrowed references, executable closures, live object references, or local channel/select capabilities: messages cross the serialized/frozen actor transport boundary. Execution-domain-local `Channel<T>` values may carry owned functions/closures and owned object references. Channel writes move move-only payloads, borrowed payload types are rejected transitively, and `nb select` registrations take ownership of every candidate move-only write payload because the caller continues before settlement. A local channel itself cannot cross an actor mailbox, so callable local channels do not bypass actor isolation.
 
 **Binding rules:** `const x` is fixed/read-only; `val x` is fixed/mutable (`const mut x`); `let x` is rebindable/read-only; `let mut x` is rebindable/mutable. All mutable operations still require ownership/exclusive borrow. Static select read cases default immutable: `case msg = readch(input) -> { ... }`; `case val msg` permits mutations on owned values without rebinding; `case mut msg` allows rebinding too. Migration is tracked by [compiler PR #411](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/411).
 
