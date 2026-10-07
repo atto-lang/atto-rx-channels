@@ -1,6 +1,6 @@
 # rx-oreslang-channels
 
-A userland reactive stream library written in **Oreslang**. It uses bounded/rendezvous channels, `readch`, `nb writech`, `try` probes, dynamic `select`/`nb select`, and `await`. It has no dependency on `std/rx` and adds no Java reactive implementation.
+A userland reactive stream library written in **Oreslang**. It uses bounded/rendezvous channels, `readch`, `nb writech`, `try` probes, dynamic `select`/`nb select`, and `await`. It follows the pointerless ownership model throughout. `src/rx.ores` is a plain file/code unit, not a synthetic package or module wrapper; callers import the file with `import * as ...` and/or select declarations by relative path. It has no dependency on `std/rx` and adds no Java reactive implementation.
 
 This library lives outside core/std-lib. The core rx-ores implementation can evolve independently while this version exercises Oreslang's channel and source-frame suspension APIs.
 
@@ -14,14 +14,14 @@ source .work/env.sh
 python3 scripts/test.py
 ```
 
-`compiler.lock` pins the exact reference compiler revision. The initial release requires the source-method suspension fix in [oreslang-source.java PR #308](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/308). Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
+`compiler.lock` pins the exact reference compiler revision. This branch requires the merged Future/select work plus the pointerless first-class `Fnc<T,...>` ownership convergence and the data-only Channel payload boundary: callback calls temporarily read-borrow ordinary arguments, while explicit ownership operations use the reserved `rt copy`, `rt share`, `rt borrow`, and `rt take` surface. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
 
 You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/classes` plus its Maven dependency classpath. Set `JAVA` to the Java executable if necessary.
 
 ## Channel source with async/await
 
 ```ores
-import module rx_channels from './src/rx.ores';
+import * as rx_channels from './src/rx.ores';
 import class Observable, Subscription from './src/rx.ores';
 
 pub async fnc main(): void {
@@ -44,7 +44,7 @@ pub async fnc main(): void {
 }
 ```
 
-The reference compiler currently rejects generic `async fnc` declarations and async instance methods. The generic library therefore uses **ordinary methods whose source bodies suspend**. `Subscription.next()` returns `Option<T>` at the source level; call it directly inside a resumable source workflow. `send()` and `complete()` return real `Future<void>` registrations that callers explicitly `await`. `from_future()` adapts an existing Future. See [examples/channel_async.ores](examples/channel_async.ores) and [examples/pipeline.ores](examples/pipeline.ores).
+The reference compiler currently rejects generic `async fnc` declarations and async instance methods. The generic library therefore uses **ordinary methods whose source bodies suspend**. `Subscription.next()` returns `Option<T>` at the source level; call it directly inside a resumable source workflow. Internally, channel subscriptions use `nb select`, whose value form is `Future<Option<SelectResult>>`; awaiting it yields the current Ores continuation rather than parking an actor carrier. `send()` and `complete()` return real `Future<void>` registrations that callers explicitly `await`. `from_future()` adapts an existing Future. See [examples/channel_async.ores](examples/channel_async.ores) and [examples/pipeline.ores](examples/pipeline.ores).
 
 Imports of generic functions currently use the module-qualified direct-call form. Explicit types on imported results retain useful checking across the current import boundary.
 
@@ -56,7 +56,7 @@ Imports of generic functions currently use the module-qualified direct-call form
 | `from_channel(Channel<Option<T>>)` | Hot input with one consumer; no background pump |
 | `from_future(Future<T>)` | One shared Future result, then completion |
 | `map(Observable<A>, Fnc<A, B>)` | One transform per demanded item |
-| `filter(Observable<T>, Fnc<&T, bool>)` | Iterative pulls until a predicate accepts |
+| `filter(Observable<T>, Fnc<T, bool>)` | Iterative pulls until a predicate accepts; the callback receives temporary read access |
 | `take(Observable<T>, int)` | At most N items, then cancels upstream |
 | `merge_channels(left, right)` | Fair deterministic merging of two channel inputs |
 | `first(Observable<T>)` | One pull, then cancels the subscription |
@@ -66,14 +66,15 @@ Imports of generic functions currently use the module-qualified direct-call form
 | `subscription.next()` | Suspends until data/completion/failure; one outstanding pull |
 | `subscription.cancel()` | Idempotent cancellation; returns true only once |
 
-A filter borrows its argument so rejection never moves away a retained payload. For scalar predicates the current compiler needs an explicit conversion from the borrowed value, for example:
+Oreslang's source ownership model is pointerless. Callback types stay ordinary, for example `Fnc<int, bool>` or `Fnc<T, bool>`; a first-class callback call receives temporary read access without encoding a C/Rust-style pointer type. If code needs a named borrow beyond one call expression it uses `rt borrow value`, not `&value`.
 
 ```ores
-val Fnc<&int, bool> even = |x| -> {
-  val int value = x as int;
+val Fnc<int, bool> even = |value| -> {
   return value % 2 == 0;
 };
 ```
+
+The library and test runner reject pointer-style callback types, unary address-of borrows, and pointer declarations.
 
 ## Stream contract
 
@@ -82,11 +83,12 @@ val Fnc<&int, bool> even = |x| -> {
 - Pull operators have no prefetch queue. `take(0)` consumes nothing. `take(N)` cancels upstream immediately after its Nth value. Filter uses a loop rather than recursive callbacks.
 - Each channel input has one subscriber. Multiple subscriptions compete for frames; this is not multicast, and one completion frame cannot terminate multiple consumers. Use distinct channels for fan-out. The two merge inputs must be distinct channels.
 - Merge keeps reusable FAIR select sets, removes completed inputs from selection, and finishes only when both complete. Cancellation uses a select control arm, allowing the runtime to remove losing read registrations.
+- Dynamic `select from` returns `Option<SelectResult>`; `nb select from` returns native `Future<Option<SelectResult>>`; `try select from` remains an immediate `Option<SelectResult>` probe.
 - Cancellation leaves the producer's channel open and preserves values not claimed by a winning selection. Later pulls return `None`. A read that already won a race may have consumed its value before cancellation.
 - Future sources retain the producer's lifetime. Cancelling an adapter does not cancel its shared Future; an already pending Future pull waits for settlement and then discards its value if cancelled. Channel sources are the adapter for prompt cancellation of a pending read.
 - Operator/Future failures propagate through source suspension; they are not emitted as data or mistaken for normal completion. Ordinary guest failures use `Result.expect` because this compiler has no guest `throw`/rethrow statement. `finally` clears demand and disposes upstream even when a language panic bypasses `catch`.
 - Replay with `from_values` is intended for immutable/copyable payloads. Use a single-consumer channel for owned mutable payloads; replay does not deep-copy objects.
-- Channels and subscriptions stay in their execution domain. They cannot cross actor mailboxes; use ActorRef/mailbox protocols for actor-to-actor transport. Structured actor cancellation remains runtime-owned.
+- Channels and subscriptions stay in their execution domain. They cannot cross actor mailboxes; use ActorRef/mailbox protocols for actor-to-actor transport. Function/closure values are deliberately not channel payloads: callbacks remain local and channels carry data. Structured actor cancellation remains runtime-owned.
 
 This is an initial pull-oriented implementation, not complete Rx operator parity. Timed operators, multicast subjects, variadic merge, and shared-Future cancellation need additional work.
 
