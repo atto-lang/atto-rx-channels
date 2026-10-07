@@ -95,3 +95,7 @@ This is an initial pull-oriented implementation, not complete Rx operator parity
 ## Validation
 
 The test runner type/ownership-checks the library, examples, and every test program, then executes each with a timeout and checks exact output or an expected failure. Coverage includes replay, completion ordering, operator composition, cancellation/idempotence, no prefetch, fair merge with unequal input lengths, rendezvous backpressure, Future adaptation, upstream failure, and invalid take counts. The [CI template](ci/test.workflow.yml) builds the pinned compiler and runs the same suite. Copy it to `.github/workflows/test.yml` using credentials with workflow write permission to activate it. The connected GitHub OAuth token lacks that scope, so the template is preserved outside the workflow directory. Because the compiler repository is private, CI requires an `ORES_COMPILER_READ_TOKEN` repository secret with read-only access to `oreslang-source.java`; the default workflow token cannot read a different private repository. The workflow fails explicitly when this secret is absent. Local validation uses your existing Git authentication.
+
+## Compiler compatibility checkpoint (2026-10-06)
+
+This repository tracks the latest 10 compiler PRs as **unmerged proposals**, without changing its stable compiler pin or API behavior. See [docs/compiler-pr-sync.md](docs/compiler-pr-sync.md) for rx-oreslang-channels-specific migration invariants, dependencies and validation gates.
