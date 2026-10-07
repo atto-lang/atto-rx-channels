@@ -80,7 +80,8 @@ define class Subscription<T> as
 
   // All termination paths share one cleanup claim, including pending-pull
   // cancellation, natural completion, and the panic/finally path.
-  pub dispose_once(): void {
+  // Internal cleanup claim; consumers should use cancel().
+  dispose_once(): void {
     if !(try writech self.disposed, true); then
       return;
     fi
@@ -230,6 +231,40 @@ define class FramedSender<T> as
     return nb writech self.output, end_frame;
   }
 end
+
+// The transport and sender never escape; one producer, one subscriber.
+define class FramedPipe<T> extends Observable<T> as
+  val Channel<Option<T>> input;
+  val FramedSender<T> writer;
+  val Channel<bool> subscribed = Channel.new<bool>(1);
+
+  constructor(int capacity) {
+    self.input = Channel.new<Option<T>>(capacity);
+    self.writer = new FramedSender<T>(self.input);
+  }
+
+  pub send(T value): Future<void> { return self.writer.send(value); }
+  pub complete(): Future<void> { return self.writer.complete(); }
+  pub is_complete(): bool { return self.writer.is_complete(); }
+
+  pub subscribe(): Subscription<T> {
+    if !(try writech self.subscribed, true); then
+      val Result<bool, String> failure = Err("only one subscriber is allowed");
+      failure.expect("rx_channels.FramedPipe.subscribe");
+    fi
+    return new ChannelSubscription<T>(self.input);
+  }
+end
+
+// Until generic return-context inference is available across imports, callers
+// pass an explicitly typed None to bind T. Reject Some rather than consuming data.
+pub fnc framed_pipe<T>(int capacity, Option<T> witness): FramedPipe<T> {
+  if witness.is_some(); then
+    val Result<bool, String> failure = Err("framed pipe witness must be None");
+    failure.expect("rx_channels.framed_pipe");
+  fi
+  return new FramedPipe<T>(capacity);
+}
 
 pub fnc framed_sender<T>(Channel<Option<T>> output): FramedSender<T> {
   return new FramedSender<T>(output);

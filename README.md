@@ -22,24 +22,21 @@ You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/c
 
 ```ores
 import * as rx_channels from './src/rx.ores';
-import class Observable, Subscription, FramedSender from './src/rx.ores';
+import class FramedPipe, Subscription, StreamEvent from './src/rx.ores';
 
 pub async fnc main(): void {
-  val Channel<Option<int>> input = Channel.new<Option<int>>(0);
-  // Registers a rendezvous write and returns immediately.
-  val FramedSender<int> producer = rx_channels.framed_sender(input);
-  val Future<void> producing = producer.send(42);
-  val Observable<int> source = rx_channels.from_channel(input);
-  val Subscription<int> sub = source.subscribe();
+  // Current compiler needs a typed None witness for generic inference.
+  val Option<int> element_type = None;
+  val FramedPipe<int> pipe = rx_channels.framed_pipe(0, element_type);
+  val Future<void> producing = pipe.send(42);
+  val Subscription<int> sub = pipe.subscribe();
 
-  // Suspends internally on await (nb select ...), releasing the carrier.
-  val Option<int> value = sub.next();
-  stdio.println(value.unwrap());
+  val StreamEvent<int> item = sub.next_event();
+  stdio.println(item.value.unwrap());
   await producing;
 
-  val Future<void> finishing = producer.complete();
-  val Option<int> terminal = sub.next();
-  stdio.println(terminal.is_none());
+  val Future<void> finishing = pipe.complete();
+  stdio.println(sub.next_event().is_complete());
   await finishing;
   return;
 }
@@ -62,6 +59,9 @@ Imports of generic functions currently use the module-qualified direct-call form
 | `merge_channels(left, right)` | Fair deterministic merging of two channel inputs |
 | `first(Observable<T>)` | Compatibility helper returning `Option<T>`; cancellation in `finally` |
 | `first_required(Observable<T>)` | Returns `T`, fails on empty rather than returning `None` (native Future-valued `first()` is a future integration target) |
+| `framed_pipe(capacity, typedNone)` | **Preferred:** privately owns one writer/channel and admits one subscriber |
+| `pipe.send(value)` / `pipe.complete()` | Bounded writes, rejects duplicate completion and writes after completion |
+| `pipe.subscribe()` | Claims the single subscriber; duplicate calls fail |
 | `framed_sender(Channel<Option<T>>)` | Creates checked `FramedSender<T>` for ordered terminal writes |
 | `writer.send(value)` | Rejects sends after completion; returns bounded write `Future<void>` |
 | `writer.complete()` | Claims termination exactly once and writes `None`; repeats fail |
@@ -106,3 +106,9 @@ This is an initial pull-oriented implementation, not complete Rx operator parity
 ## Validation
 
 The test runner type/ownership-checks the library, examples, and every test program, then executes each with a timeout and checks exact output or an expected failure. Coverage includes replay and array ownership rejection, completion ordering, checked sender double-close/send-after-close rejection, natural completion vs cancellation events, cleanup-at-most-once, `first_required` on present/empty sources, operator composition, no prefetch, fair merge, rendezvous backpressure, Future adaptation, upstream failure, and invalid take counts. The existing `.github/workflows/test.yml` builds the pinned compiler and runs the suite when its `ORES_COMPILER_READ_TOKEN` read-only secret is present. Since a default `GITHUB_TOKEN` cannot check out private cross-org sources, funded-org regression runs instead mirror the *exact compiler Git tree* and this library's source/tests into the same test repository, verify compiler blob identity, and run there with no cross-org checkout secret. Local validation uses existing Git authentication.
+
+## Ownership and lifecycle audit (October 2026)
+
+`framed_pipe(capacity, typedNone)` is the recommended entry point when the stream owns its channel. Its transport and sender are private and it accepts only one subscriber; this eliminates external raw-write bypass of the terminal sentinel for this API. Existing `framed_sender(rawChannel)` and `from_channel(rawChannel)` remain compatibility adapters without this enforcement. All methods assume task/actor-local sequential access; the source `marked()` read/restore probe is not an atomic cross-thread peek. `Subscription.dispose_once()` is private to prevent external callers from triggering cleanup independently of terminal state. `pull()` and `dispose()` are still public override hooks pending support for protected class methods, and must not be called directly. Native `std/rx` remains the eventual authority on structured cancellation.
+
+**Generic factory note:** The pinned compiler forbids public constructors on file-private classes and explicit generic type arguments on imported function calls. For now create a typed `None` value (for example `val Option<int> witness = None;`) and call `rx_channels.framed_pipe(0, witness)`. The witness is *not* a stream value and is checked to be `None`; it only enables generic parameter inference. This avoids exposing the pipe's raw channel while respecting file-private class visibility.
