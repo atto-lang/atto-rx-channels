@@ -241,7 +241,7 @@ define class RawChannelSubscription<T> extends Subscription<T> as
     } catch (err) {
       // Channel close is the raw channel's terminal frame; all other
       // transport errors remain failures rather than fabricated completion.
-      if self.input.is_closed(); then
+      if self.input.is_closed_normally(); then
         return None;
       fi
       val Result<Option<T>, Object> failure = Err(err);
