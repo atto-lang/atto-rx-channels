@@ -152,8 +152,10 @@ channel subscriptions require at most one active subscriber per adapter;
 different adapters over the same input still compete for reads. Cancellation
 only signals the subscription's private control channel, not stdin itself.
 
-**Known limitation:** `Channel<T>.is_closed()` currently cannot distinguish
-normal close from close-with-cause. This draft may interpret a caused close as
-normal completion; a later core API must distinguish those terminal outcomes
-to preserve observable error semantics. No claim of Rx/Web Streams parity or
-fully validated stdin process integration is made until exact-head tests run.
+**Compiler dependency:** core PR #540 adds `Channel<T>.is_closed_normally()`
+to distinguish EOF from close-with-cause; this adapter uses that new predicate,
+so it will not type-check against the older compiler pinned on `main`.
+A failed channel closes the subscription with an error instead of fabricating
+normal completion. A real Graal runtime/compiler proof against the exact
+stacked core head is required before either PR merges. No claim of full
+Rx/Web Streams parity is made.
