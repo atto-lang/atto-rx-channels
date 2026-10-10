@@ -52,6 +52,7 @@ Imports of generic functions currently use the module-qualified direct-call form
 | --- | --- |
 | `from_values(Array<T>)` | Takes ownership of its move-only array; separate cursor per subscription |
 | `from_channel(Channel<Option<T>>)` | Hot input with one consumer; no background pump |
+| `from_ch(Channel<T>)` | Raw process/channel input; channel close terminates the stream; one subscriber per adapter; no new pump |
 | `from_future(Future<T>)` | One shared Future result, then completion |
 | `map(Observable<A>, Fnc<A, B>)` | One transform per demanded item |
 | `filter(Observable<T>, Fnc<T, bool>)` | Iterative pulls until a predicate accepts; the callback receives temporary read access |
@@ -116,3 +117,43 @@ This repository tracks compiler PRs #398/#399/#404/#405/#406/#408/#409/#410/#411
 `framed_pipe(capacity, typedNone)` is the recommended entry point when the stream owns its channel. Its transport and sender are private and it accepts only one subscriber; this eliminates external raw-write bypass of the terminal sentinel for this API. Existing `framed_sender(rawChannel)` and `from_channel(rawChannel)` remain compatibility adapters without this enforcement. All methods assume task/actor-local sequential access; the source `marked()` read/restore probe is not an atomic cross-thread peek. `Subscription.dispose_once()` is private to prevent external callers from triggering cleanup independently of terminal state. `pull()` and `dispose()` are still public override hooks pending support for protected class methods, and must not be called directly. Native `std/rx` remains the eventual authority on structured cancellation.
 
 **Generic factory note:** The pinned compiler forbids public constructors on file-private classes and explicit generic type arguments on imported function calls. For now create a typed `None` value (for example `val Option<int> witness = None;`) and call `rx_channels.framed_pipe(0, witness)`. The witness is *not* a stream value and is checked to be `None`; it only enables generic parameter inference. This avoids exposing the pipe's raw channel while respecting file-private class visibility.
+
+
+## Raw stdin channel as Observable (draft)
+
+`process.stdin` and `stdio.in` are proposed identity-stable special
+`Channel<String>` instances in
+[Oreslang compiler PR #540](https://github.com/ores-truffle-oreslang/oreslang-source.java/pull/540).
+They are **not** `Channel<Option<String>>`: stdin EOF closes the channel
+rather than enqueuing an explicit `None` frame.
+
+For this adapter, import the Rx file **as a namespace named `Observable`**:
+
+```ores
+import * as Observable from './src/rx.ores';
+
+pub async fnc main(): void {
+  val stream = Observable.from_ch(stdio.in);
+  val sub = stream.subscribe();
+  val Option<String> first = sub.next();
+  sub.cancel(); // does NOT close process.stdin
+  return;
+}
+```
+
+The exact expression `Observable.from_ch(stdio.in)` is supported **as a
+module-qualified userland function**, not currently as a static generic
+method of the `Observable<T>` class. A true class-static generic factory
+still needs a compiler language-contract decision.
+
+`from_ch` treats channel closure as completion. It does not interpret
+arbitrary string data as a terminal marker. Unlike `from_channel`, raw
+channel subscriptions require at most one active subscriber per adapter;
+different adapters over the same input still compete for reads. Cancellation
+only signals the subscription's private control channel, not stdin itself.
+
+**Known limitation:** `Channel<T>.is_closed()` currently cannot distinguish
+normal close from close-with-cause. This draft may interpret a caused close as
+normal completion; a later core API must distinguish those terminal outcomes
+to preserve observable error semantics. No claim of Rx/Web Streams parity or
+fully validated stdin process integration is made until exact-head tests run.
