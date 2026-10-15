@@ -104,6 +104,31 @@ This API uses snake_case names for all Oreslang methods and functions.
 See common-source PR #36 for cross-family semantic contracts, RX #7 for
 the raw-channel close bridge, and test CLI #5 for protocol model checks.
 
+
+### Result/exception propagation is not a stream terminal shortcut
+
+The new language-level postfix `?` contract (common-source PR #36) exits the
+**innermost callable**. Using `?` inside an Observable mapping callback
+would return `Err`/`None` from that callback where its type allows it;
+it **does not** implicitly terminate the outer Observable, send a channel
+close frame, or catch a panic. `filter_map` explicitly expects
+`Option<B>`: `None` skips an item, not the subscription.
+
+A separate future `try_filter_map`/`try_map` family should accept a
+`Result`-valued transform, preserve the original typed error and emit an
+explicit **ERROR** subscription terminal event after upstream disposal.
+This needs an error-capable `StreamEvent`, native guest throw propagation,
+and terminal/cancellation arbitration before it can be admitted.
+
+**Audit gap:** the current `Subscription.next()` catch path constructs an
+`Err` and invokes `expect`, which may turn an escaping ordinary error into
+a panic under existing compiler semantics. Do not claim deterministic
+`throws` → reactive terminal preservation or trap/catch integration until
+that path is rewritten and tested with *real* source-level `throw`,
+`raise`, `panic`, cancellation and nested cleanup. Ordinary failures
+must not be misreported as `COMPLETE`, and supervisor-bound panic must
+never be caught by a userland retry operator.
+
 ## Stream contract
 
 - The preferred `FramedSender<T>` transports `Some(value)` then exactly one `None`, claiming termination before submitting the terminal write. Duplicate completion and sender writes after that claim fail. Completion remains in the data FIFO and cannot overtake previously registered writes.
