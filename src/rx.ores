@@ -330,6 +330,36 @@ define class FilterSubscription<T> extends Subscription<T> as
   }
 end
 
+// Demand-driven Option-valued transform. Rejected (None) items are skipped;
+// no background pump, prefetch, or cross-actor forwarding is introduced.
+define class FilterMapSubscription<A, B> extends Subscription<B> as
+  val Subscription<A> upstream;
+  val Fnc<A, Option<B>> transform;
+
+  constructor(Subscription<A> upstream, Fnc<A, Option<B>> transform) {
+    self.upstream = upstream;
+    self.transform = transform;
+  }
+
+  pub pull(): Option<B> {
+    loop {
+      val Option<A> frame = self.upstream.next();
+      if frame.is_none(); then
+        return None;
+      fi
+      val Option<B> mapped = self.transform(frame.unwrap());
+      if mapped.is_some(); then
+        return mapped;
+      fi
+    }
+  }
+
+  pub dispose(): void {
+    self.upstream.cancel();
+    return;
+  }
+end
+
 define class TakeSubscription<T> extends Subscription<T> as
   val Subscription<T> upstream;
   val Channel<int> remaining = Channel.new<int>(1);
@@ -388,6 +418,18 @@ define class FilterObservable<T> extends Observable<T> as
   }
 end
 
+define class FilterMapObservable<A, B> extends Observable<B> as
+  val Observable<A> source;
+  val Fnc<A, Option<B>> transform;
+  constructor(Observable<A> source, Fnc<A, Option<B>> transform) {
+    self.source = source;
+    self.transform = transform;
+  }
+  pub subscribe(): Subscription<B> {
+    return new FilterMapSubscription<A, B>(self.source.subscribe(), self.transform);
+  }
+end
+
 define class TakeObservable<T> extends Observable<T> as
   val Observable<T> source;
   val int count;
@@ -406,6 +448,12 @@ pub fnc map<A, B>(Observable<A> source, Fnc<A, B> transform): Observable<B> {
 
 pub fnc filter<T>(Observable<T> source, Fnc<T, bool> predicate): Observable<T> {
   return new FilterObservable<T>(source, predicate);
+}
+
+// Option-based transform is not a Result error handler. Callback errors
+// follow the ordinary guest failure path, never become completion.
+pub fnc filter_map<A, B>(Observable<A> source, Fnc<A, Option<B>> transform): Observable<B> {
+  return new FilterMapObservable<A, B>(source, transform);
 }
 
 pub fnc take<T>(Observable<T> source, int count): Observable<T> {
