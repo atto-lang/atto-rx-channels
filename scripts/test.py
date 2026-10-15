@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 import subprocess
 import sys
+from fixture_inventory import validate_cases
 
 ROOT = Path(__file__).resolve().parents[1]
 JAVA = os.environ.get('JAVA', 'java')
@@ -41,12 +42,13 @@ def run(args):
         raise RuntimeError(result.stdout + result.stderr)
     return result.stdout.strip()
 
+TESTS = validate_cases(ROOT / 'tests', ('.out', '.err', '.check.err'))
 assert_pointerless()
 run(['--check', str(ROOT / 'src/rx.ores')])
 for example in sorted((ROOT / 'examples').glob('*.ores')):
     run(['--check', str(example)])
 failures = []
-for path in sorted((ROOT / 'tests').glob('*.ores')):
+for path in TESTS:
     try:
         check_error_file = path.with_suffix('.check.err')
         if check_error_file.exists():
