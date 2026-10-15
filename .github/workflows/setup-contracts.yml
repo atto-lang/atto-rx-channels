@@ -1,4 +1,4 @@
-name: Compiler setup contracts
+name: Compiler setup and runner contracts
 on:
   push:
   pull_request:
@@ -13,4 +13,4 @@ jobs:
         with:
           persist-credentials: false
       - name: Check compiler admission and failed-build launcher contracts
-        run: python3 -m unittest discover -s tests -p test_setup.py -v
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
