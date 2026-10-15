@@ -55,6 +55,7 @@ Imports of generic functions currently use the module-qualified direct-call form
 | `from_future(Future<T>)` | One shared Future result, then completion |
 | `map(Observable<A>, Fnc<A, B>)` | One transform per demanded item |
 | `filter(Observable<T>, Fnc<T, bool>)` | Iterative pulls until a predicate accepts; the callback receives temporary read access |
+| `filter_map(Observable<A>, Fnc<A, Option<B>>)` | Lazy Option-based transform; skips None with no prefetch or implicit error swallowing |
 | `take(Observable<T>, int)` | At most N items, then cancels upstream |
 | `merge_channels(left, right)` | Fair deterministic merging of two channel inputs |
 | `first(Observable<T>)` | Compatibility helper returning `Option<T>`; cancellation in `finally` |
@@ -82,6 +83,26 @@ val Fnc<int, bool> even = |value| -> {
 ```
 
 The library and test runner reject pointer-style callback types, unary address-of borrows, and pointer declarations.
+
+## Relationship to Future, Stream and Channel
+
+This library's `Observable<T>` is a **subscription factory**, not a synonym
+for a source `Stream<T>` or `AsyncIterator<T>`. A `Subscription<T>`
+executes pull-driven work; `filter_map` calls its mapper only after upstream
+provides a value and skips `None` without issuing extra concurrent demand.
+A `Future<T>` represents one pending completion, and `from_future`
+retains its existing producer ownership and cancellation limits.
+
+A raw `Channel<T>` is transport, not an Observable; bridges such as
+`from_channel` and the draft `from_ch` must declare framing, close/failure
+semantics, subscriber cardinality and cancellation. A single-reader channel
+does not become multicast merely because an Observable wrapper exists.
+`StreamEvent<T>` distinguishes next, natural completion and cancellation;
+do not interpret a value-level `None` or `Err` as a terminal event.
+
+This API uses snake_case names for all Oreslang methods and functions.
+See common-source PR #36 for cross-family semantic contracts, RX #7 for
+the raw-channel close bridge, and test CLI #5 for protocol model checks.
 
 ## Stream contract
 
