@@ -12,7 +12,9 @@ pub async fnc main(): void {
   stdio.println(aborted.cancel());
   stdio.println(aborted.next().is_none());
   // Cancellation before demand must not prefetch or consume raw input.
-  stdio.println((readch input).unwrap());
-  stdio.println((readch input).unwrap());
+  val Option<int> first = readch input;
+  val Option<int> second = readch input;
+  stdio.println(first.unwrap());
+  stdio.println(second.unwrap());
   return;
 }
