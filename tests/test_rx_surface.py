@@ -5,11 +5,23 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-KIND = ROOT.name
-EXPECTED = {"rx-ores": "8\n10\ntrue\ntrue",
-            "rx-oreslang-channels": "8\n10\ntrue\ntrue",
-            "rx-ores-callbacks": "5\n0"}
+# Infer the model from source; exact-tree CI may use a renamed checkout.
+SOURCE = (ROOT / "src/rx.ores").read_text()
+if "pub subscribe(Fnc<T, bool> on_next): int" in SOURCE:
+    KIND = "callbacks"
+elif "fnc marked(Channel<bool> marker)" in SOURCE:
+    KIND = "channels"
+elif "dispose_once(mut self)()" in SOURCE:
+    KIND = "pull"
+else:
+    raise AssertionError("Unrecognized Rx implementation")
+EXPECTED = {"pull": "8\n10\ntrue\ntrue",
+            "channels": "8\n10\ntrue\ntrue",
+            "callbacks": "5\n0"}
 class RxStaticContracts(unittest.TestCase):
+    def test_model_classifier_is_checkout_path_independent(self):
+        self.assertIn(KIND, EXPECTED)
+
     def test_locked_compiler_is_exact_sha(self):
         self.assertRegex((ROOT / "compiler.lock").read_text().strip(), r"\A[0-9a-f]{40}\Z")
 
@@ -32,7 +44,7 @@ class RxStaticContracts(unittest.TestCase):
         self.assertIn(".err", (ROOT / "scripts/test.py").read_text())
 
     def test_callback_variant_never_uses_suspending_language_calls(self):
-        if KIND != "rx-ores-callbacks":
+        if KIND != "callbacks":
             self.skipTest("callback-only invariant")
         source = (ROOT / "src/rx.ores").read_text()
         code = "\n".join(line.split("//")[0] for line in source.splitlines())
@@ -40,7 +52,7 @@ class RxStaticContracts(unittest.TestCase):
         self.assertNotRegex(code, r"\b(?:Future|Channel)\s*<")
 
     def test_future_variant_cleans_up_once(self):
-        if KIND != "rx-ores":
+        if KIND != "pull":
             self.skipTest("pull/Future-specific invariant")
         source = (ROOT / "src/rx.ores").read_text()
         self.assertIn("dispose_once(mut self)()", source)
