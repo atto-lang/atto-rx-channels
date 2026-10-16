@@ -33,6 +33,18 @@ class RxStaticContracts(unittest.TestCase):
         self.assertIn("if count < 0; then", body)
         self.assertIn('Err("skip count must be nonnegative")', body)
 
+    def test_take_rejects_negative_count_during_operator_creation(self):
+        src = (ROOT / "src/rx.ores").read_text()
+        start = src.index("class TakeObservable<T>")
+        end = src.index("\nend", start)
+        body = src[start:end]
+        self.assertIn("if count < 0; then", body)
+        self.assertIn('Err("take count must be nonnegative")', body)
+        tests = ROOT / "tests"
+        self.assertTrue((tests / "negative_take.ores").is_file())
+        self.assertIn("take count must be nonnegative",
+                      (tests / "negative_take.err").read_text())
+
     def test_positive_and_negative_fixtures_are_wired(self):
         tests = ROOT / "tests"
         self.assertEqual((tests / "skip_composition.out").read_text().strip(),
