@@ -392,6 +392,10 @@ define class TakeObservable<T> extends Observable<T> as
   val Observable<T> source;
   val int count;
   constructor(Observable<T> source, int count) {
+    if count < 0; then
+      val Result<bool, String> failure = Err("take count must be nonnegative");
+      failure.expect("rx_channels.take");
+    fi
     self.source = source;
     self.count = count;
   }
