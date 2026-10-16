@@ -1,0 +1,18 @@
+import * as rx_channels from '../src/rx.ores';
+import class Observable, Subscription from '../src/rx.ores';
+
+pub async fnc main(): void {
+  val Channel<Option<int>> input = Channel.new<Option<int>>(2);
+  writech input, Some(7);
+  writech input, Some(8);
+  val Observable<int> source = rx_channels.from_channel(input);
+  val Observable<int> skipped = rx_channels.skip(source, 1);
+  val Subscription<int> aborted = skipped.subscribe();
+  stdio.println(aborted.cancel());
+  stdio.println(aborted.cancel());
+  stdio.println(aborted.next().is_none());
+  // Cancellation before demand must not prefetch or consume raw input.
+  stdio.println((readch input).unwrap());
+  stdio.println((readch input).unwrap());
+  return;
+}
