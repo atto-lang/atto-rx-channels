@@ -516,6 +516,62 @@ pub fnc from_future<T>(Future<T> pending): Observable<T> {
 
 // Compatibility view: empty is None. Use first_required for a failed
 // stream-style first() when no element exists.
+
+// The channel prototype keeps skip state in a subscription-owned token cell.
+// No upstream value is prefetched beyond the downstream next() request.
+define class SkipSubscription<T> extends Subscription<T> as
+  val Subscription<T> upstream;
+  val Channel<int> remaining = Channel.new<int>(1);
+
+  constructor(Subscription<T> upstream, int count) {
+    if count < 0; then
+      val Result<bool, String> failure = Err("skip count must be nonnegative");
+      failure.expect("rx_channels.skip");
+    fi
+    self.upstream = upstream;
+    writech self.remaining, count;
+  }
+
+  pub pull(): Option<T> {
+    let int missing = readch self.remaining;
+    loop {
+      if missing == 0; then
+        writech self.remaining, 0;
+        return self.upstream.next();
+      fi
+      val Option<T> dropped = self.upstream.next();
+      if dropped.is_none(); then
+        writech self.remaining, 0;
+        return None;
+      fi
+      missing = missing - 1;
+    }
+  }
+
+  pub dispose(): void {
+    self.upstream.cancel();
+    return;
+  }
+end
+
+define class SkipObservable<T> extends Observable<T> as
+  val Observable<T> source;
+  val int count;
+
+  constructor(Observable<T> source, int count) {
+    self.source = source;
+    self.count = count;
+  }
+
+  pub subscribe(): Subscription<T> {
+    return new SkipSubscription<T>(self.source.subscribe(), self.count);
+  }
+end
+
+pub fnc skip<T>(Observable<T> source, int count): Observable<T> {
+  return new SkipObservable<T>(source, count);
+}
+
 pub fnc first<T>(Observable<T> source): Option<T> {
   val Subscription<T> sub = source.subscribe();
   try {
