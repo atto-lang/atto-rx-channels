@@ -55,6 +55,8 @@ end
 define class Subscription<T> as
   val Channel<bool> cancelled = Channel.new<bool>(1);
   val Channel<bool> finished = Channel.new<bool>(1);
+  // Failure is terminal but is never natural completion.
+  val Channel<bool> failed = Channel.new<bool>(1);
   val Channel<bool> pulling = Channel.new<bool>(1);
   val Channel<bool> disposed = Channel.new<bool>(1);
 
@@ -69,6 +71,11 @@ define class Subscription<T> as
     // The control token is always removed, including on early returns.
     writech self.state_busy, true;
     try {
+      if marked(self.failed); then
+        val Result<Option<T>, String> prior_failure =
+            Err("subscription previously failed");
+        return prior_failure.expect("rx_channels.Subscription.next");
+      fi
       if marked(self.cancelled) || marked(self.finished); then
         return None;
       fi
@@ -94,13 +101,13 @@ define class Subscription<T> as
       fi
       return frame;
     } catch (err) {
-      self.claim_finished();
+      self.claim_failed();
       self.dispose_once();
       val Result<Option<T>, Object> failure = Err(err);
       return failure.expect("rx_channels upstream failed");
     } finally {
       if !marked(settled); then
-        self.claim_finished();
+        self.claim_failed();
         self.dispose_once();
       fi
       try readch self.pulling;
@@ -120,10 +127,26 @@ define class Subscription<T> as
   claim_finished(): bool {
     writech self.state_busy, true;
     try {
-      if marked(self.cancelled) || marked(self.finished); then
+      if marked(self.cancelled) || marked(self.finished) ||
+          marked(self.failed); then
         return false;
       fi
       val bool claimed = try writech self.finished, true;
+      return claimed;
+    } finally {
+      try readch self.state_busy;
+    }
+  }
+
+  // Claim failure only if cancellation or natural completion has not won.
+  claim_failed(): bool {
+    writech self.state_busy, true;
+    try {
+      if marked(self.cancelled) || marked(self.finished) ||
+          marked(self.failed); then
+        return false;
+      fi
+      val bool claimed = try writech self.failed, true;
       return claimed;
     } finally {
       try readch self.state_busy;
@@ -152,7 +175,17 @@ define class Subscription<T> as
   pub is_complete(): bool {
     writech self.state_busy, true;
     try {
-      return marked(self.finished) && !marked(self.cancelled);
+      return marked(self.finished) && !marked(self.cancelled) &&
+          !marked(self.failed);
+    } finally {
+      try readch self.state_busy;
+    }
+  }
+
+  pub is_failed(): bool {
+    writech self.state_busy, true;
+    try {
+      return marked(self.failed);
     } finally {
       try readch self.state_busy;
     }
@@ -173,7 +206,8 @@ define class Subscription<T> as
     writech self.state_busy, true;
     let bool claimed = false;
     try {
-      if marked(self.cancelled) || marked(self.finished); then
+      if marked(self.cancelled) || marked(self.finished) ||
+          marked(self.failed); then
         return false;
       fi
       claimed = try writech self.cancelled, true;
