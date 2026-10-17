@@ -212,15 +212,27 @@ define class Subscription<T> as
     }
   }
 
+  pub next_event_result(): Result<StreamEvent<T>, Object> {
+    val Result<Option<T>, Object> outcome = self.next_result();
+    match outcome
+      Ok(frame) -> {
+        if frame.is_some(); then
+          return Ok(new StreamEvent<T>("next", frame));
+        fi
+        if self.is_cancelled(); then
+          return Ok(new StreamEvent<T>("cancelled", None));
+        fi
+        return Ok(new StreamEvent<T>("complete", None));
+      }
+      Err(err) -> {
+        return Err(err);
+      }
+    end
+  }
+
   pub next_event(): StreamEvent<T> {
-    val Option<T> frame = self.next();
-    if frame.is_some(); then
-      return new StreamEvent<T>("next", frame);
-    fi
-    if self.is_cancelled(); then
-      return new StreamEvent<T>("cancelled", None);
-    fi
-    return new StreamEvent<T>("complete", None);
+    val Result<StreamEvent<T>, Object> outcome = self.next_event_result();
+    return outcome.expect("rx_channels upstream failed");
   }
 
   pub cancel(): bool {
