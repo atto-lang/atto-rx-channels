@@ -461,12 +461,27 @@ define class MapSubscription<A, B> extends Subscription<B> as
     self.transform = transform;
   }
 
+  pub pull_result(): Result<Option<B>, Object> {
+    val Result<Option<A>, Object> outcome = self.upstream.next_result();
+    match outcome
+      Ok(frame) -> {
+        if frame.is_none(); then
+          return Ok(None);
+        fi
+        try {
+          return Ok(Some(self.transform(frame.unwrap())));
+        } catch (err) {
+          return Err(err);
+        }
+      }
+      Err(err) -> {
+        return Err(err);
+      }
+    end
+  }
+
   pub pull(): Option<B> {
-    val Option<A> frame = self.upstream.next();
-    if frame.is_none(); then
-      return None;
-    fi
-    return Some(self.transform(frame.unwrap()));
+    return self.pull_result().expect("rx_channels.MapSubscription.pull");
   }
 
   pub dispose(): void {
@@ -484,17 +499,32 @@ define class FilterSubscription<T> extends Subscription<T> as
     self.predicate = predicate;
   }
 
-  pub pull(): Option<T> {
+  pub pull_result(): Result<Option<T>, Object> {
     loop {
-      val Option<T> frame = self.upstream.next();
-      if frame.is_none(); then
-        return None;
-      fi
-      val T value = frame.unwrap();
-      if self.predicate(value); then
-        return Some(value);
-      fi
+      val Result<Option<T>, Object> outcome = self.upstream.next_result();
+      match outcome
+        Ok(frame) -> {
+          if frame.is_none(); then
+            return Ok(None);
+          fi
+          val T value = frame.unwrap();
+          try {
+            if self.predicate(value); then
+              return Ok(Some(value));
+            fi
+          } catch (err) {
+            return Err(err);
+          }
+        }
+        Err(err) -> {
+          return Err(err);
+        }
+      end
     }
+  }
+
+  pub pull(): Option<T> {
+    return self.pull_result().expect("rx_channels.FilterSubscription.pull");
   }
 
   pub dispose(): void {
@@ -516,19 +546,31 @@ define class TakeSubscription<T> extends Subscription<T> as
     writech self.remaining, count;
   }
 
-  pub pull(): Option<T> {
+  pub pull_result(): Result<Option<T>, Object> {
     val int count = readch self.remaining;
     if count == 0; then
       writech self.remaining, 0;
       self.upstream.cancel();
-      return None;
+      return Ok(None);
     fi
     writech self.remaining, count - 1;
-    val Option<T> frame = self.upstream.next();
-    if count == 1 || frame.is_none(); then
-      self.upstream.cancel();
-    fi
-    return frame;
+    val Result<Option<T>, Object> outcome = self.upstream.next_result();
+    match outcome
+      Ok(frame) -> {
+        if count == 1 || frame.is_none(); then
+          self.upstream.cancel();
+        fi
+        return Ok(frame);
+      }
+      Err(err) -> {
+        self.upstream.cancel();
+        return Err(err);
+      }
+    end
+  }
+
+  pub pull(): Option<T> {
+    return self.pull_result().expect("rx_channels.TakeSubscription.pull");
   }
 
   pub dispose(): void {
