@@ -238,8 +238,9 @@ define pub class CreditPipe<T, E> as
       fi
       claimed = try writech self.cancelled, true;
       if claimed; then
+        // Revoke unused producer demand immediately, but keep the outstanding
+        // request claim until next_signal() consumes the CANCELLED outcome.
         try readch self.demand;
-        try readch self.requested;
         try readch self.writing;
       fi
     } finally {
