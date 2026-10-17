@@ -68,7 +68,8 @@ Imports of generic functions currently use the module-qualified direct-call form
 | `writer.send(value)` | Rejects sends after completion; returns write `Future<void>`; direct callers can still accumulate pending registrations |
 | `writer.send_blocking(value)` / `writer.complete_blocking()` | Serialize one in-flight delivery across actual settlement using a private delivery credit |
 | `writer.complete()` | Claims termination exactly once and writes `None`; repeats fail |
-| `subscription.next_event_result()` | **Recoverable path:** `Result<StreamEvent<T>, Object>`; `Err` is never rewritten to `complete` |
+| `subscription.next_signal()` | **Preferred closed typed signal:** `Result<Option<T>, Option<Object>>` = `Ok(Some(T))` NEXT, `Ok(None)` COMPLETE, `Err(None)` CANCELLED, `Err(Some(error))` ERROR |
+| `subscription.next_event_result()` | Legacy-object compatibility projection from `next_signal()`; `Err(error)` is never rewritten to `complete` |
 | `subscription.next_event()` | Legacy compatibility projection; panics on `Err`; event tags remain `next`, `complete`, or `cancelled` only |
 | `subscription.is_complete()/is_cancelled()/is_failed()` | Query mutually arbitrated terminal state; failure is not completion |
 | `send(channel, value)` | Legacy **unchecked** raw helper; caller must uphold terminal protocol |
@@ -108,10 +109,7 @@ marker observations/terminal claims with a separate short-lived
 already consumed a frame that cannot be undone. This is a candidate
 source-level state protocol, **not** proven race-free guest execution.
 
-`next_result()` and `next_event_result()` now preserve ordinary upstream
-failures as `Result.Err(Object)` through `map`, `filter`, and `take`, while
-legacy `next()` / `next_event()` deliberately remain panicking compatibility
-wrappers. `FutureSubscription` now uses an atomic stop-channel/Future select so cancellation can detach its waiter without cancelling the borrowed producer. Still missing: a closed typed `StreamEvent.Error<E>` variant; compile-time enforcement that legacy Future-returning sends are awaited; rigorous multi-producer handling,
+`next_result()` preserves ordinary upstream failures as `Result.Err(Object)` through `map`, `filter`, and `take`. `next_signal()` adds a **closed, exhaustively matchable terminal projection using compiler-owned ADTs**: `Ok(Some(T))` NEXT, `Ok(None)` COMPLETE, `Err(None)` CANCELLED, and `Err(Some(error))` ERROR. This keeps `T = Option<U>` (`Ok(Some(None))`) and `T = Result<A,B>` ordinary data unambiguous. `next_event_result()` is now only a compatibility conversion from that typed signal, while legacy `next()` / `next_event()` remain panicking wrappers. `FutureSubscription` uses an atomic stop-channel/Future select so cancellation can detach its waiter without cancelling the borrowed producer. Still missing: a future ergonomic nominal/sealed `StreamEvent.Error<E>` spelling once the language has closed user-defined ADTs; compile-time enforcement that legacy Future-returning sends are awaited; rigorous multi-producer handling,
 cross-actor isolation and scheduler-level race tests. Until real pinned
 compiler tests run, do not advertise lossless
 `Observable`/`Stream`/`Channel` conversion or full parity.
@@ -156,14 +154,14 @@ enforce execution-domain confinement and admission budgets.
 - Merge keeps reusable FAIR select sets, removes completed inputs from selection, and finishes only when both complete. Cancellation uses a select control arm, allowing the runtime to remove losing read registrations.
 - Dynamic `select from` returns `Option<SelectResult>`; `nb select from` returns native `Future<Option<SelectResult>>`; `try select from` remains an immediate `Option<SelectResult>` probe.
 - Cancellation leaves the producer's channel open and preserves values not claimed by a winning selection. A read that already won a race may have consumed its value before cancellation.
-- For backward compatibility, `next(): Option<T>` returns `None` on both cancellation and natural completion. Prefer `next_event()` for explicit `NEXT`/`COMPLETE`/`CANCELLED` states. Failures are propagated, never encoded as `COMPLETE`. This does **not** yet replicate the native `OresFuture` cancellation state in `next()`.
+- For backward compatibility, `next(): Option<T>` returns `None` on both cancellation and natural completion. Prefer `next_signal()` when terminal cause matters: it is closed and typed across NEXT / COMPLETE / CANCELLED / ERROR. `next_event()` remains the legacy three-tag object projection and cannot itself carry ERROR.
 - Termination cleanup is claimed exactly once across completion, failure, and explicit cancellation. `cancel()` after natural completion returns false, and does not re-dispose a completed subscription.
 - Future sources retain the producer's lifetime. `FutureSubscription` atomically selects its private stop channel against the shared Future; cancellation signals stop, the losing Future listener is detached, and the producer Future remains independently awaitable. If the Future already won, the subscription's terminal-state check suppresses post-cancel delivery.
-- Ordinary operator/Future failures use the recoverable `Result` path: `next_result()`, `next_event_result()`, operator `pull_result()`, and `first_result()` preserve `Err(Object)` without converting it to completion. Legacy `next()`, `next_event()`, operator `pull()`, and `first()` remain compatibility wrappers that use `Result.expect`. `finally` clears demand and disposes upstream even when a stronger panic/cancellation signal bypasses ordinary `catch`.
+- Ordinary operator/Future failures use the recoverable `Result` path: `next_result()`, operator `pull_result()`, and `first_result()` preserve `Err(Object)` without converting it to completion. `next_signal()` maps that failure to `Err(Some(error))`; cancellation is the distinct `Err(None)`. Legacy `next()`, `next_event()`, operator `pull()`, and `first()` remain compatibility wrappers that use `Result.expect`. `finally` clears demand and disposes upstream even when a stronger panic/cancellation signal bypasses ordinary `catch`.
 - `Array<T>` is move-only on the pinned compiler. `from_values` accepts ownership of that array, so the caller must not access or mutate it after transfer. `rt copy` on move-only arrays is **not yet supported** without `Symbol.rtCopy` lowering, and must not be silently treated as a shallow alias. Replay shares the captured collection across subscriptions; nested mutable objects still require explicit safe ownership or immutability. Use channels for owned mutable payloads.
 - Channels and subscriptions stay in their execution domain. They cannot cross actor mailboxes; use ActorRef/mailbox protocols for actor-to-actor transport. Function/closure values are deliberately not channel payloads: callbacks remain local and channels carry data. Structured actor cancellation remains runtime-owned.
 
-This is an initial pull-oriented implementation, not complete Rx operator parity. Timed operators, multicast subjects, variadic merge, a closed typed stream-error event ABI, and static enforcement for callers that choose the legacy Future-returning sender API need additional work.
+This is an initial pull-oriented implementation, not complete Rx operator parity. Timed operators, multicast subjects, variadic merge, an ergonomic nominal/sealed stream-event ADT spelling, and static enforcement for callers that choose the legacy Future-returning sender API need additional work.
 
 ## Validation
 
