@@ -14,9 +14,23 @@ source .work/env.sh
 python3 scripts/test.py
 ```
 
-`compiler.lock` pins exact Java stack head `3d5fe12329b8fc45249a87b836e9431e3ab89893` (draft Java PR #1218), stacked on current-main integration #1193. #1193 supplies Future/channel select plus concrete recursively data-only `Channel<T>` payloads; #1218 adds declaration-order-independent generic obligation inference and post-substitution enforcement so generic `Channel<T>` use cannot later bind to Future/Channel/Object/runtime-capability payloads. This pin is intentionally **draft-only** until the exact stack head runs focused JDK25 tests and full Maven. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
+`compiler.lock` pins exact Java stack head `3d5fe12329b8fc45249a87b836e9431e3ab89893` (draft Java PR #1218), stacked on current-main integration #1193. Current Java main already contains Future/channel select, waiter detachment, cancellation-revocation fencing, and retained-arm budgets; #1193 adds the concrete recursively data-only Channel policy and #1218 adds declaration-order-independent generic obligation inference plus post-substitution enforcement. This pin is intentionally **draft-only** until the integration head itself runs JDK25/full Maven. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
 
 You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/classes` plus its Maven dependency classpath. Set `JAVA` to the Java executable if necessary.
+
+## Experimental typed credit-gated transport
+
+`src/credit_stream.ores` defines draft `CreditPipe<T,E>`, stacked on the
+hardened subscription/runtime work above. Its preferred public terminal surface
+is the same closed signal shape as `Subscription.next_signal()`, but typed in
+`E`: `Result<Option<T>, Option<E>>`.
+
+`Ok(Some(T))` is NEXT, `Ok(None)` COMPLETE, `Err(None)` CANCELLED, and
+`Err(Some(E))` explicit typed ERROR. One `request()` admits exactly one
+publisher event, and private serialized state gates bound one reader and one
+writer registration. See [credit stream v2](docs/credit-stream-v1.md).
+
+This remains draft-only until the stacked Java #1218 head (including #1193) and this exact Rx head execute.
 
 ## Channel source with async/await
 
@@ -133,7 +147,7 @@ Pending `pull()` remains outside the permit so a cancelling task can enter,
 claim cancellation and invoke `dispose_once()`. `FutureSubscription` no longer
 raw-awaits its producer: it selects between `SelectCase.read(stopped)` and
 `SelectCase.future(pending)`. A stop win detaches the Future waiter without
-cancelling the shared producer. This relies on the current-main compiler stack #1193 + generic-soundness #1218;
+cancelling the shared producer. This relies on current-main compiler integration #1193 plus generic-soundness #1218;
 the underlying Future-select primitive has historical exact-tree evidence from Java #880, but this Rx exact head
 has not yet executed under the pinned compiler, so bounded cancellation latency
 is still an **unverified integration claim**, not release evidence.

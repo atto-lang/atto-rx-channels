@@ -1,0 +1,6 @@
+import class CreditPipe from '../src/credit_stream.ores';
+pub async fnc main(): void {
+  val Channel<CreditPipe<int, String>> bad =
+      Channel.new<CreditPipe<int, String>>(1);
+  return;
+}

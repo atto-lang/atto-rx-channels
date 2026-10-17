@@ -1,0 +1,15 @@
+import * as credit from '../src/credit_stream.ores';
+import class CreditPipe from '../src/credit_stream.ores';
+
+pub async fnc main(): void {
+  val Option<int> value_type = None;
+  val Option<String> error_type = None;
+  val CreditPipe<int, String> pipe = credit.credit_pipe(0, value_type, error_type);
+  stdio.println(pipe.subscribe());
+  stdio.println(pipe.request());
+  val Future<Option<SelectResult>> pending = pipe.send(12);
+  stdio.println(pipe.cancel());
+  val Option<SelectResult> selected = await pending;
+  stdio.println(selected.unwrap().index == 0);
+  return;
+}
