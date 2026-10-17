@@ -44,9 +44,9 @@ class SubscriptionFailureAdmission(unittest.TestCase):
         subscription = text.split("define class Subscription<T> as", 1)[1].split(
             "define class Observable<T> as", 1
         )[0]
-        next_method = subscription.split("pub next(): Option<T>", 1)[1].split(
-            "pub pull(): Option<T>", 1
-        )[0]
+        next_method = subscription.split(
+            "pub next_result(): Result<Option<T>, Object>", 1
+        )[1].split("pub next(): Option<T>", 1)[0]
         self.assertLess(
             next_method.index("marked(self.failed)"),
             next_method.index("marked(self.cancelled)")
@@ -64,6 +64,7 @@ class SubscriptionFailureAdmission(unittest.TestCase):
         cancel = subscription.split("pub cancel(): bool", 1)[1]
         self.assertIn("marked(self.failed)", finished)
         self.assertIn("marked(self.failed)", cancel)
+
     def test_failure_status_is_never_natural_complete(self):
         text = SOURCE.read_text(encoding="utf-8")
         subscription = text.split("define class Subscription<T> as", 1)[1].split(
@@ -71,7 +72,7 @@ class SubscriptionFailureAdmission(unittest.TestCase):
         )[0]
         self.assertIn("pub is_failed(): bool", subscription)
         complete = subscription.split("pub is_complete(): bool", 1)[1].split(
-            "pub next_event(): StreamEvent<T>", 1
+            "pub is_failed(): bool", 1
         )[0]
         self.assertIn("marked(self.failed)", complete)
 
