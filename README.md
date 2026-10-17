@@ -14,7 +14,7 @@ source .work/env.sh
 python3 scripts/test.py
 ```
 
-`compiler.lock` pins exact Java integration commit `52c897340795394a9bdca36955f2a3a4579ba59b` (draft Java PR #1188), stacked on the exact-tree-verified Future/channel select runtime from Java #880 while restoring Rx's recursively data-only `Channel<T>` callable boundary. This pin is intentionally **draft-only** until the integration head itself runs JDK25/full Maven. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
+`compiler.lock` pins exact Java current-main integration commit `ad8a314e1e8bba2902d963a5b4c9b9d4d44cfc82` (draft Java PR #1193). Current Java main already contains Future/channel select, waiter detachment, cancellation-revocation fencing, and retained-arm budgets; #1193 is only the Rx-required recursively data-only `Channel<T>` policy plus focused Rx cancellation regressions. This pin is intentionally **draft-only** until the integration head itself runs JDK25/full Maven. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
 
 You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/classes` plus its Maven dependency classpath. Set `JAVA` to the Java executable if necessary.
 
@@ -135,8 +135,8 @@ Pending `pull()` remains outside the permit so a cancelling task can enter,
 claim cancellation and invoke `dispose_once()`. `FutureSubscription` no longer
 raw-awaits its producer: it selects between `SelectCase.read(stopped)` and
 `SelectCase.future(pending)`. A stop win detaches the Future waiter without
-cancelling the shared producer. This relies on compiler integration #1188;
-its base primitive is exact-tree tested in Java #880, but this Rx exact head
+cancelling the shared producer. This relies on current-main compiler integration #1193;
+the underlying Future-select primitive has historical exact-tree evidence from Java #880, but this Rx exact head
 has not yet executed under the pinned compiler, so bounded cancellation latency
 is still an **unverified integration claim**, not release evidence.
 
