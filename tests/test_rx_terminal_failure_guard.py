@@ -31,7 +31,7 @@ class SubscriptionFailureAdmission(unittest.TestCase):
             "define class Observable<T> as", 1
         )[0]
         cleanup = subscription.split("if !marked(settled); then", 1)[1].split(
-            "fi", 1
+            "\n      fi", 1
         )[0]
         self.assertNotIn(
             "self.claim_finished();", cleanup,
