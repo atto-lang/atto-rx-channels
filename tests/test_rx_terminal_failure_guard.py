@@ -65,6 +65,25 @@ class SubscriptionFailureAdmission(unittest.TestCase):
         self.assertIn("marked(self.failed)", finished)
         self.assertIn("marked(self.failed)", cancel)
 
+    def test_typed_signal_is_closed_and_legacy_event_projects_from_it(self):
+        text = SOURCE.read_text(encoding="utf-8")
+        subscription = text.split("define class Subscription<T> as", 1)[1].split(
+            "define class Observable<T> as", 1
+        )[0]
+        signal = subscription.split(
+            "pub next_signal(): Result<Option<T>, Option<Object>>", 1
+        )[1].split("pub next_event_result():", 1)[0]
+        self.assertIn("return Ok(frame);", signal)
+        self.assertIn("return Ok(None);", signal)
+        self.assertIn("return Err(None);", signal)
+        self.assertIn("return Err(Some(err));", signal)
+
+        legacy = subscription.split(
+            "pub next_event_result(): Result<StreamEvent<T>, Object>", 1
+        )[1].split("pub next_event(): StreamEvent<T>", 1)[0]
+        self.assertIn("self.next_signal()", legacy)
+        self.assertNotIn("self.next_result()", legacy)
+
     def test_failure_status_is_never_natural_complete(self):
         text = SOURCE.read_text(encoding="utf-8")
         subscription = text.split("define class Subscription<T> as", 1)[1].split(
