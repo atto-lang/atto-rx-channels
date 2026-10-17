@@ -14,7 +14,7 @@ source .work/env.sh
 python3 scripts/test.py
 ```
 
-`compiler.lock` pins exact Java stack head `51afcdc67e047c0f652e018216b658901448bb26` (draft Java PR #1218), stacked on current-main integration #1193. #1193 supplies Future/channel select plus concrete recursively data-only `Channel<T>` payloads; #1218 adds declaration-order-independent generic obligation inference and post-substitution enforcement so generic `Channel<T>` use cannot later bind to Future/Channel/Object/runtime-capability payloads. This pin is intentionally **draft-only** until the exact stack head runs focused JDK25 tests and full Maven. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
+`compiler.lock` pins exact Java stack head `3d5fe12329b8fc45249a87b836e9431e3ab89893` (draft Java PR #1218), stacked on current-main integration #1193. #1193 supplies Future/channel select plus concrete recursively data-only `Channel<T>` payloads; #1218 adds declaration-order-independent generic obligation inference and post-substitution enforcement so generic `Channel<T>` use cannot later bind to Future/Channel/Object/runtime-capability payloads. This pin is intentionally **draft-only** until the exact stack head runs focused JDK25 tests and full Maven. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
 
 You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/classes` plus its Maven dependency classpath. Set `JAVA` to the Java executable if necessary.
 
