@@ -37,12 +37,12 @@ class ReactiveStateSourceContract(unittest.TestCase):
                 self.assertNotIn(forbidden, section)
 
     def test_next_checks_terminal_and_claims_singleflight_under_same_gate(self):
-        next_method = self.method("pub next(): Option<T>", "pub pull(): Option<T>")
+        next_method = self.method("pub next_result(): Result<Option<T>, Object>", "pub next(): Option<T>")
         acquired = next_method.index("writech self.state_busy, true;")
         terminal_check = next_method.index("marked(self.cancelled)")
         pull_claim = next_method.index("try writech self.pulling, true")
         released = next_method.index("try readch self.state_busy")
-        source_pull = next_method.index("self.pull()")
+        source_pull = next_method.index("self.pull_result()")
         self.assertTrue(acquired < terminal_check < pull_claim < released < source_pull)
 
     def test_cancel_terminal_claim_is_guarded_and_dispose_is_outside_gate(self):
