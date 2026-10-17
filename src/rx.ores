@@ -17,17 +17,37 @@ fnc marked(Channel<bool> marker): bool {
   return false;
 }
 
-// A source-level notification view: cancelled is distinct from natural end.
+// Legacy source-level projection. This is intentionally not the full
+// NEXT/COMPLETE/ERROR/CANCELLED typed event ABI. Do not use it to launder
+// ordinary failures into normal completion. Constructor admission is strict:
+// Some(None) is valid when T itself is an Option.
 define class StreamEvent<T> as
   val String kind;
   pub val Option<T> value;
   constructor(String kind, Option<T> value) {
+    if kind != "next" && kind != "complete" && kind != "cancelled"; then
+      val Result<bool, String> invalid =
+          Err("StreamEvent kind must be next, complete, or cancelled");
+      invalid.expect("rx_channels.StreamEvent");
+    fi
+    if kind == "next" && value.is_none(); then
+      val Result<bool, String> invalid = Err("StreamEvent next requires Some");
+      invalid.expect("rx_channels.StreamEvent");
+    fi
+    if kind != "next" && value.is_some(); then
+      val Result<bool, String> invalid =
+          Err("StreamEvent terminal must not carry a value");
+      invalid.expect("rx_channels.StreamEvent");
+    fi
     self.kind = kind;
     self.value = value;
   }
   pub is_next(): bool { return self.kind == "next"; }
   pub is_complete(): bool { return self.kind == "complete"; }
   pub is_cancelled(): bool { return self.kind == "cancelled"; }
+  pub is_terminal(): bool {
+    return self.kind == "complete" || self.kind == "cancelled";
+  }
 end
 
 define class Subscription<T> as
