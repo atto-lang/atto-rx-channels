@@ -212,20 +212,46 @@ define class Subscription<T> as
     }
   }
 
-  pub next_event_result(): Result<StreamEvent<T>, Object> {
+  // Closed typed signal using compiler-owned Option/Result ADTs:
+  //   Ok(Some(value)) = NEXT(value)
+  //   Ok(None)        = COMPLETE
+  //   Err(None)       = CANCELLED
+  //   Err(Some(error))= ERROR(error)
+  //
+  // Nested data remains unambiguous. If T = Option<U>, NEXT(None) is
+  // Ok(Some(None)); if T = Result<A,B>, Err data is still inside Some(T).
+  pub next_signal(): Result<Option<T>, Option<Object>> {
     val Result<Option<T>, Object> outcome = self.next_result();
     match outcome
       Ok(frame) -> {
         if frame.is_some(); then
-          return Ok(new StreamEvent<T>("next", frame));
+          return Ok(frame);
         fi
         if self.is_cancelled(); then
-          return Ok(new StreamEvent<T>("cancelled", None));
+          return Err(None);
+        fi
+        return Ok(None);
+      }
+      Err(err) -> {
+        return Err(Some(err));
+      }
+    end
+  }
+
+  pub next_event_result(): Result<StreamEvent<T>, Object> {
+    val Result<Option<T>, Option<Object>> signal = self.next_signal();
+    match signal
+      Ok(frame) -> {
+        if frame.is_some(); then
+          return Ok(new StreamEvent<T>("next", frame));
         fi
         return Ok(new StreamEvent<T>("complete", None));
       }
-      Err(err) -> {
-        return Err(err);
+      Err(error) -> {
+        if error.is_none(); then
+          return Ok(new StreamEvent<T>("cancelled", None));
+        fi
+        return Err(error.unwrap());
       }
     end
   }
