@@ -91,16 +91,50 @@ cross-family typed terminal ABI. Its constructor now rejects unknown tags,
 `Some(None)` remains a legal `Next` event when `T = Option<U>`.
 `is_terminal()` is true only for `complete` and `cancelled`.
 
-This prevents accidental malformed *objects* but does not settle concurrent
-send/complete/cancel claims. The existing `marked()` read-and-restore token
-helper is not atomic against concurrent callers and must not be treated as
-a linearizable state check. The missing typed `Error(E)` branch, subscriber
-cancellation wakeup for borrowed Futures, and serialized/budgeted sender
-admission are still unresolved. Until those are implemented and actually
-tested by the pinned Oreslang compiler, do **not** advertise lossless
-`Observable`/`Stream`/`Channel` conversion or general race freedom.
+This prevents accidental malformed *objects* but does not supply
+typed `Error(E)` events. The existing `marked()` read-and-restore helper
+is intrinsically non-atomic; it is valid only while a dedicated source-level
+state permit serializes all accesses to that marker, or when a marker has
+exactly one owner. The `Subscription` methods `next()`, `cancel()`,
+`is_complete()`, `is_cancelled()`, and `claim_finished()` now protect
+marker observations/terminal claims with a separate short-lived
+`state_busy` capacity-one channel. That permit is **not held during**
+`pull()`, user callbacks, or `dispose()`. A cancelled pull may have
+already consumed a frame that cannot be undone. This is a candidate
+source-level state protocol, **not** proven race-free guest execution.
+
+Still missing: typed terminal errors; cancellation wakeup for borrowed
+Futures; bounded pending write credits; rigorous multi-producer handling,
+cross-actor isolation and scheduler-level race tests. Until real pinned
+compiler tests run, do not advertise lossless
+`Observable`/`Stream`/`Channel` conversion or full parity.
 See [common-source contract #61](https://github.com/ores-truffle-oreslang/oreslang-common-source/pull/61)
 and [runtime hardening issue #18](https://github.com/ores-truffle-oreslang/rx-oreslang-channels/issues/18).
+
+## Subscription state and cancellation audit
+
+The original `Subscription.next()` tested terminal markers, then registered
+`pulling` in a **separate** operation. Concurrent `cancel()` or natural
+completion could interleave between those steps, and `cancel()` similarly
+read-and-restored markers outside any common gate.
+
+A short-lived `state_busy` write-held permit now covers:
+
+- OPEN/terminal check together with the one-outstanding-pull admission
+- cancellation versus natural-completion terminal claims
+- `is_complete()` and `is_cancelled()` state observations
+
+Pending `pull()` remains outside the permit so a cancelling task can enter,
+claim cancellation and invoke `dispose_once()`. A terminal-state claim
+does not itself prove that every host Future wait is interruptible. In
+particular `FutureSubscription.pull()` still awaits its borrowed producer
+without a cancellation-aware select registration: it may finish only when
+the producer's Future settles. Do not claim bounded cancellation latency.
+
+Even the short state permit is backed by normal channel wait registrations;
+this implementation has no independently proven bound on an adversarial
+number of simultaneous callers. The native scheduler/ownership layer must
+enforce execution-domain confinement and admission budgets.
 
 ## Stream contract
 
@@ -132,6 +166,6 @@ This repository tracks compiler PRs #398/#399/#404/#405/#406/#408/#409/#410/#411
 
 ## Ownership and lifecycle audit (October 2026)
 
-`framed_pipe(capacity, typedNone)` is the recommended entry point when the stream owns its channel. Its transport and sender are private and it accepts only one subscriber; this eliminates external raw-write bypass of the terminal sentinel for this API. Existing `framed_sender(rawChannel)` and `from_channel(rawChannel)` remain compatibility adapters without this enforcement. All methods assume task/actor-local sequential access; the source `marked()` read/restore probe is not an atomic cross-thread peek. `Subscription.dispose_once()` is private to prevent external callers from triggering cleanup independently of terminal state. `pull()` and `dispose()` are still public override hooks pending support for protected class methods, and must not be called directly. Native `std/rx` remains the eventual authority on structured cancellation.
+`framed_pipe(capacity, typedNone)` is the recommended entry point when the stream owns its channel. Its transport and sender are private and it accepts only one subscriber; this eliminates external raw-write bypass of the terminal sentinel for this API. Existing `framed_sender(rawChannel)` and `from_channel(rawChannel)` remain compatibility adapters without this enforcement. The sender and subscription now serialize their *own* relevant marker accesses with separate permits, but raw marker probes remain non-atomic and the runtime has not been race-certified. `Subscription.dispose_once()` is private to prevent external callers from triggering cleanup independently of terminal state. `pull()` and `dispose()` are still public override hooks pending support for protected class methods, and must not be called directly. Native `std/rx` remains the eventual authority on structured cancellation.
 
 **Generic factory note:** The pinned compiler forbids public constructors on file-private classes and explicit generic type arguments on imported function calls. For now create a typed `None` value (for example `val Option<int> witness = None;`) and call `rx_channels.framed_pipe(0, witness)`. The witness is *not* a stream value and is checked to be `None`; it only enables generic parameter inference. This avoids exposing the pipe's raw channel while respecting file-private class visibility.
