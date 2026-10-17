@@ -79,6 +79,26 @@ class RunContract(unittest.TestCase):
         with self.assertRaises(module.Denied):
             self.validate()
 
+    def test_disguised_runner_housekeeping_cannot_count_as_execution(self):
+        for disguised in (" ", "\t", "  Set up job ", "set UP job",
+                          " POST Checkout", "pre Setup", " Complete job "):
+            with self.subTest(step=disguised):
+                self.assertFalse(module.executable_step_name(disguised))
+        self.assertTrue(module.executable_step_name("Prepare build"))
+        self.assertTrue(module.executable_step_name("Execute test suite"))
+
+    def test_whitespace_only_job_name_denied_with_real_test_step(self):
+        page = self.prefix + "/actions/runs/17/jobs?filter=latest&per_page=100&page=1"
+        self.values[page]["jobs"][0]["name"] = " \t "
+        with self.assertRaisesRegex(module.Denied, "missing workflow job name"):
+            self.validate()
+
+    def test_whitespace_only_step_name_denied_despite_real_test_step(self):
+        page = self.prefix + "/actions/runs/17/jobs?filter=latest&per_page=100&page=1"
+        self.values[page]["jobs"][0]["steps"][0]["name"] = "  \t  "
+        with self.assertRaisesRegex(module.Denied, "no name"):
+            self.validate()
+
 
     def _switch_fixture_to_run_id_one(self):
         old = self.prefix + "/actions/runs/17"
@@ -740,6 +760,68 @@ class RunContract(unittest.TestCase):
 
 
 
+class StrictApiJSONContract(unittest.TestCase):
+    """API transport must not silently reinterpret ambiguous run metadata."""
+
+    def test_canonical_github_object_is_accepted(self):
+        data = module._strict_api_json(
+            b'{"id":17,"repository":{"id":1400792274},"ok":true}')
+        self.assertEqual(data["repository"]["id"], 1400792274)
+        self.assertIs(data["ok"], True)
+
+    def test_duplicate_keys_rejected_even_in_nested_metadata(self):
+        for raw in (
+            b'{"id":17,"id":18}',
+            b'{"repository":{"id":1,"id":2}}',
+            b'{"repository":{"owner":{"login":"a","login":"b"}}}',
+        ):
+            with self.subTest(raw=raw):
+                with self.assertRaisesRegex(module.Denied, "duplicate"):
+                    module._strict_api_json(raw)
+
+    def test_nonstandard_and_nonfinite_json_denied(self):
+        for raw in (
+            b'{"id":NaN}', b'{"id":Infinity}', b'{"id":-Infinity}',
+            b'{"id":1e999}', b'{"id":-1e999}',
+            b'{"id":' + b"9" * 65 + b"}",
+            b'{"id":1.' + b"1" * 130 + b"}",
+            b'{"id":+1}', b'{"id":01}', b'{"id":1} trailing',
+        ):
+            with self.subTest(raw=raw[:80]):
+                with self.assertRaises(module.Denied):
+                    module._strict_api_json(raw)
+
+    def test_input_shape_encoding_and_size_denied(self):
+        for raw in (b'[]', b'null', b'2', b'""', b'{not-json}',
+                    b'{"id":"\\xff"}', b'{"bad":' + b"x" * 20 + b"}",
+                    b'{"id":1}\xff', "{}", None,
+                    b' ' * (module.MAX_API_JSON_BYTES + 1)):
+            with self.subTest(sample=str(raw)[:65]):
+                with self.assertRaises(module.Denied):
+                    module._strict_api_json(raw)
+
+    def test_authenticated_fetch_applies_strict_parser(self):
+        class Response:
+            status = 200
+            def __init__(self, body):
+                self.body = body
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self, length):
+                return self.body[:length]
+
+        with patch.dict("os.environ", {"GH_TOKEN": "synthetic-only"}, clear=True):
+            with patch.object(module.urllib.request, "urlopen",
+                              return_value=Response(b'{"id":17,"id":18}')):
+                with self.assertRaisesRegex(module.Denied, "duplicate"):
+                    module._api_get("repos/example/repo")
+            with patch.object(module.urllib.request, "urlopen",
+                              return_value=Response(b'{"id":17}')):
+                self.assertEqual(module._api_get("repos/example/repo"), {"id":17})
+
+
 class WorkflowIsolationContract(unittest.TestCase):
     """Prevent candidate import-path shadowing in CI report generation."""
 
@@ -808,6 +890,17 @@ class WorkflowIsolationContract(unittest.TestCase):
                 self.assertIs(report["trigger_sha_matches_reported_checkout"], expected)
                 self.assertIs(report["verified_execution_claim"], False)
 
+
+    def test_workflow_checkout_is_pinned_and_uncredentialed(self):
+        workflow = self.workflow_text()
+        self.assertIn(
+            "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+            workflow)
+        self.assertIn("persist-credentials: false", workflow)
+        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", workflow)
+        self.assertIn("contents: read", workflow)
+        self.assertNotIn("pull_request_target:", workflow)
+        self.assertNotIn("secrets.", workflow)
 
 
 if __name__ == "__main__":

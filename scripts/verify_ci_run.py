@@ -7,6 +7,7 @@ It never copies source, triggers CI, or mutates GitHub state.
 import argparse
 from datetime import datetime
 import json
+import math
 import os
 import re
 import sys
@@ -34,8 +35,14 @@ HOUSEKEEPING_STEPS = frozenset({
 def executable_step_name(name):
     # Runner-generated lifecycle steps cannot substitute for a required
     # build, test, or native guest-execution step.
-    return (isinstance(name, str) and name not in HOUSEKEEPING_STEPS
-            and not name.startswith(("Post ", "Pre ")))
+    if not isinstance(name, str):
+        return False
+    normalized = name.strip().casefold()
+    # A blank or disguised runner-generated step is not build/test execution.
+    # Normalize padding and case before excluding housekeeping and pre/post.
+    return (bool(normalized)
+            and normalized not in {step.casefold() for step in HOUSEKEEPING_STEPS}
+            and re.match(r"^(pre|post)\s", normalized) is None)
 
 
 class Denied(ValueError):
@@ -87,6 +94,52 @@ def _timestamp(value, label):
         raise Denied(label + " has an invalid execution timestamp") from exc
 
 
+MAX_API_JSON_BYTES = 4 * 1024 * 1024
+
+
+def _strict_api_json(raw):
+    # GitHub evidence must not depend on Python's permissive last-key-wins
+    # parser, JavaScript-only nonfinite numbers, or lossy giant numeric tokens.
+    if not isinstance(raw, bytes) or len(raw) > MAX_API_JSON_BYTES:
+        raise Denied("GitHub API JSON response is missing or oversized")
+
+    def unique_keys(pairs):
+        result = {}
+        for name, value in pairs:
+            if name in result:
+                raise Denied("GitHub API JSON has duplicate object keys")
+            result[name] = value
+        return result
+
+    def no_constant(value):
+        raise Denied("GitHub API JSON contains a nonstandard number")
+
+    def strict_int(value):
+        if len(value) > 64:
+            raise Denied("GitHub API JSON integer is oversized")
+        return int(value)
+
+    def strict_float(value):
+        if len(value) > 128:
+            raise Denied("GitHub API JSON floating-point token is oversized")
+        number = float(value)
+        if not math.isfinite(number):
+            raise Denied("GitHub API JSON contains a nonfinite number")
+        return number
+
+    try:
+        data = json.loads(raw, object_pairs_hook=unique_keys,
+                          parse_constant=no_constant, parse_int=strict_int,
+                          parse_float=strict_float)
+    except Denied:
+        # Denied derives from ValueError; retain the precise security failure
+        # instead of disguising duplicate/nonfinite metadata as generic JSON.
+        raise
+    except (UnicodeError, ValueError, OverflowError, RecursionError) as exc:
+        raise Denied("malformed GitHub API JSON response") from exc
+    return _object(data, "GitHub API response")
+
+
 def _api_get(path):
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token:
@@ -107,12 +160,7 @@ def _api_get(path):
             raw = resp.read(4 * 1024 * 1024 + 1)
     except (OSError, urllib.error.HTTPError, urllib.error.URLError) as exc:
         raise Denied("authenticated GitHub API query failed") from exc
-    if len(raw) > 4 * 1024 * 1024:
-        raise Denied("GitHub response too large")
-    try:
-        return _object(json.loads(raw), "GitHub API response")
-    except (ValueError, UnicodeError) as exc:
-        raise Denied("malformed GitHub JSON response") from exc
+    return _strict_api_json(raw)
 
 
 def verify(fetch, backend, commit, tree, run_id, required_jobs, required_steps,
@@ -252,7 +300,7 @@ def verify(fetch, backend, commit, tree, run_id, required_jobs, required_steps,
         if job_end < job_start:
             raise Denied("workflow job completion precedes its start")
         name = job.get("name")
-        if not isinstance(name, str) or not name:
+        if not isinstance(name, str) or not name.strip():
             raise Denied("missing workflow job name")
         if name in job_names:
             raise Denied("ambiguous repeated workflow job name")
@@ -281,7 +329,7 @@ def verify(fetch, backend, commit, tree, run_id, required_jobs, required_steps,
                 raise Denied("workflow step timestamps overlap or contradict execution order")
             previous_step_end = step_end
             step_name = step.get("name")
-            if not isinstance(step_name, str) or not step_name:
+            if not isinstance(step_name, str) or not step_name.strip():
                 raise Denied("workflow step has no name")
             if step_name in seen_step_names:
                 raise Denied("ambiguous duplicate workflow step name in job")
