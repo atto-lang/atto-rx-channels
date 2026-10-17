@@ -78,6 +78,18 @@ class ReactiveStateSourceContract(unittest.TestCase):
             self.assertIn("writech self.state_busy, true;", method)
             self.assertIn("try readch self.state_busy;", method)
 
+    def test_blocking_sender_holds_one_delivery_credit_until_settlement(self):
+        for start, end, operation in (
+            ("pub send_blocking(T value): void", "pub complete_blocking(): void", "self.send(value)"),
+            ("pub complete_blocking(): void", "end", "self.complete()"),
+        ):
+            section = self.sender.split(start, 1)[1].split(end, 1)[0]
+            acquired = section.index("readch self.delivery_credit")
+            submitted = section.index(operation)
+            settled = section.index("await delivery")
+            released = section.index("writech self.delivery_credit, credit")
+            self.assertTrue(acquired < submitted < settled < released)
+
     def test_sender_has_three_guarded_admission_turns(self):
         self.assertEqual(self.sender.count("readch self.admission"), 3)
         self.assertEqual(self.sender.count("writech self.admission, permit"), 3)
