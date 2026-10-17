@@ -14,7 +14,7 @@ source .work/env.sh
 python3 scripts/test.py
 ```
 
-`compiler.lock` pins exact Java current-main integration commit `f840d86744faa2a9d310ca062ad25afb0458d909` (draft Java PR #1193). Current Java main already contains Future/channel select, waiter detachment, cancellation-revocation fencing, and retained-arm budgets; #1193 adds the Rx-required recursively data-only `Channel<T>` policy, including rejection of nested runtime capabilities, plus focused Rx cancellation regressions. This pin is intentionally **draft-only** until the integration head itself runs JDK25/full Maven. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
+`compiler.lock` pins exact Java current-main integration commit `6345f236392f411628c0b892093f2d1d2fbccffb` (draft Java PR #1193). Current Java main already contains Future/channel select, waiter detachment, cancellation-revocation fencing, and retained-arm budgets; #1193 adds the Rx-required recursively data-only `Channel<T>` policy, including rejection of nested runtime capabilities, plus focused Rx cancellation regressions. This pin is intentionally **draft-only** until the integration head itself runs JDK25/full Maven. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
 
 You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/classes` plus its Maven dependency classpath. Set `JAVA` to the Java executable if necessary.
 
