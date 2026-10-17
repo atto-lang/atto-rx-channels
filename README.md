@@ -65,7 +65,7 @@ Imports of generic functions currently use the module-qualified direct-call form
 | `framed_sender(Channel<Option<T>>)` | Creates checked `FramedSender<T>` for ordered terminal writes |
 | `writer.send(value)` | Rejects sends after completion; returns bounded write `Future<void>` |
 | `writer.complete()` | Claims termination exactly once and writes `None`; repeats fail |
-| `subscription.next_event()` | Returns `StreamEvent<T>` with `next`, `complete`, or `cancelled` kind |
+| `subscription.next_event()` | Legacy `StreamEvent<T>` projection: `next`, `complete`, or `cancelled` only; constructor rejects illegal kind/payload pairs, but **not yet a typed failure event** |
 | `subscription.is_complete()/is_cancelled()` | Query terminal cause without conflating cancellation with normal completion |
 | `send(channel, value)` | Legacy **unchecked** raw helper; caller must uphold terminal protocol |
 | `complete(channel)` | Legacy **unchecked** raw helper; does not close the channel |
@@ -82,6 +82,25 @@ val Fnc<int, bool> even = |value| -> {
 ```
 
 The library and test runner reject pointer-style callback types, unary address-of borrows, and pointer declarations.
+
+## Checked legacy event construction (staged)
+
+`StreamEvent<T>` is currently a **legacy three-tag projection**, not a
+cross-family typed terminal ABI. Its constructor now rejects unknown tags,
+`next` with no payload, and `complete`/`cancelled` with a payload.
+`Some(None)` remains a legal `Next` event when `T = Option<U>`.
+`is_terminal()` is true only for `complete` and `cancelled`.
+
+This prevents accidental malformed *objects* but does not settle concurrent
+send/complete/cancel claims. The existing `marked()` read-and-restore token
+helper is not atomic against concurrent callers and must not be treated as
+a linearizable state check. The missing typed `Error(E)` branch, subscriber
+cancellation wakeup for borrowed Futures, and serialized/budgeted sender
+admission are still unresolved. Until those are implemented and actually
+tested by the pinned Oreslang compiler, do **not** advertise lossless
+`Observable`/`Stream`/`Channel` conversion or general race freedom.
+See [common-source contract #61](https://github.com/ores-truffle-oreslang/oreslang-common-source/pull/61)
+and [runtime hardening issue #18](https://github.com/ores-truffle-oreslang/rx-oreslang-channels/issues/18).
 
 ## Stream contract
 
