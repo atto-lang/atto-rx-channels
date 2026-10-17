@@ -61,10 +61,12 @@ Imports of generic functions currently use the module-qualified direct-call form
 | `first(Observable<T>)` | Compatibility helper returning `Option<T>`; panics on `Err`; cancellation in `finally` |
 | `first_required(Observable<T>)` | Returns `T`, fails on empty rather than returning `None` (native Future-valued `first()` is a future integration target) |
 | `framed_pipe(capacity, typedNone)` | **Preferred:** privately owns one writer/channel and admits one subscriber |
-| `pipe.send(value)` / `pipe.complete()` | Bounded writes, rejects duplicate completion and writes after completion |
+| `pipe.send(value)` / `pipe.complete()` | Legacy Future-returning writes; terminal-safe but callers must bound/await pending registrations |
+| `pipe.send_blocking(value)` / `pipe.complete_blocking()` | **Preferred strongest backpressure path:** one delivery credit is held until the write Future settles; suspension is non-parking |
 | `pipe.subscribe()` | Claims the single subscriber; duplicate calls fail |
 | `framed_sender(Channel<Option<T>>)` | Creates checked `FramedSender<T>` for ordered terminal writes |
-| `writer.send(value)` | Rejects sends after completion; returns bounded write `Future<void>` |
+| `writer.send(value)` | Rejects sends after completion; returns write `Future<void>`; direct callers can still accumulate pending registrations |
+| `writer.send_blocking(value)` / `writer.complete_blocking()` | Serialize one in-flight delivery across actual settlement using a private delivery credit |
 | `writer.complete()` | Claims termination exactly once and writes `None`; repeats fail |
 | `subscription.next_event_result()` | **Recoverable path:** `Result<StreamEvent<T>, Object>`; `Err` is never rewritten to `complete` |
 | `subscription.next_event()` | Legacy compatibility projection; panics on `Err`; event tags remain `next`, `complete`, or `cancelled` only |
@@ -109,7 +111,7 @@ source-level state protocol, **not** proven race-free guest execution.
 `next_result()` and `next_event_result()` now preserve ordinary upstream
 failures as `Result.Err(Object)` through `map`, `filter`, and `take`, while
 legacy `next()` / `next_event()` deliberately remain panicking compatibility
-wrappers. `FutureSubscription` now uses an atomic stop-channel/Future select so cancellation can detach its waiter without cancelling the borrowed producer. Still missing: a closed typed `StreamEvent.Error<E>` variant; bounded pending write credits; rigorous multi-producer handling,
+wrappers. `FutureSubscription` now uses an atomic stop-channel/Future select so cancellation can detach its waiter without cancelling the borrowed producer. Still missing: a closed typed `StreamEvent.Error<E>` variant; compile-time enforcement that legacy Future-returning sends are awaited; rigorous multi-producer handling,
 cross-actor isolation and scheduler-level race tests. Until real pinned
 compiler tests run, do not advertise lossless
 `Observable`/`Stream`/`Channel` conversion or full parity.
@@ -148,7 +150,7 @@ enforce execution-domain confinement and admission budgets.
 - The preferred `FramedSender<T>` transports `Some(value)` then exactly one `None`, claiming termination before submitting the terminal write. A capacity-one **admission permit** now serializes `send()`, `complete()`, and `is_complete()` terminal checks *on that sender instance*. This closes the destructive-marker observation window **for those sender methods only**; it does not establish an atomic shared `Subscription` state, protect alternate sender/raw-channel aliases, or cancel pending delivery. The permit is released after write **registration**, not after its Future settles, to preserve rendezvous progress. Duplicate completion and sender writes after the claim fail. Completion is registered after earlier writes through the same sender.
 - **Important ownership limit:** `FramedSender` is single-writer, task/actor-local state. It cannot enforce the protocol against code that retains and writes directly to the underlying raw Channel. The older raw `send(channel)` and `complete(channel)` functions remain for compatibility but are unchecked. A native channel-close adapter is the eventual stronger boundary.
 - A submitted completion `Future<void>` must be awaited. When capacity is zero or the queue is full, it can remain pending until a consumer receives the terminal frame.
-- Capacity zero is rendezvous; positive capacity bounds accepted writes. `send()` does not spin or drop when full. **The admission permit does not itself cap outstanding write Futures**. Retain and await each returned Future, or use a separately reviewed bounded in-flight policy, to bound pending producer registrations as well as the channel buffer. Concurrent calls through one sender may suspend briefly waiting for the permit.
+- Capacity zero is rendezvous; positive capacity bounds accepted writes. Legacy `send()` does not spin or drop when full, but its admission permit does **not** cap outstanding write Futures. Callers must retain/await each returned Future. Prefer `send_blocking()` / `complete_blocking()` when strict source-level backpressure is required: a private one-token delivery credit is held across `await delivery` and restored in `finally`, so that path admits at most one unsettled delivery per sender without parking a carrier.
 - Pull operators have no prefetch queue. `take(0)` consumes nothing. `take(N)` cancels upstream immediately after its Nth value. Filter uses a loop rather than recursive callbacks.
 - Each channel input has one subscriber. `from_channel` and `merge_channels` now reject a second `subscribe()` on the same Observable instead of handing out competing readers; one completion frame cannot terminate multiple consumers. This is **not multicast**. Use distinct channels for fan-out. The two merge inputs must be distinct channels.
 - Merge keeps reusable FAIR select sets, removes completed inputs from selection, and finishes only when both complete. Cancellation uses a select control arm, allowing the runtime to remove losing read registrations.
@@ -161,7 +163,7 @@ enforce execution-domain confinement and admission budgets.
 - `Array<T>` is move-only on the pinned compiler. `from_values` accepts ownership of that array, so the caller must not access or mutate it after transfer. `rt copy` on move-only arrays is **not yet supported** without `Symbol.rtCopy` lowering, and must not be silently treated as a shallow alias. Replay shares the captured collection across subscriptions; nested mutable objects still require explicit safe ownership or immutability. Use channels for owned mutable payloads.
 - Channels and subscriptions stay in their execution domain. They cannot cross actor mailboxes; use ActorRef/mailbox protocols for actor-to-actor transport. Function/closure values are deliberately not channel payloads: callbacks remain local and channels carry data. Structured actor cancellation remains runtime-owned.
 
-This is an initial pull-oriented implementation, not complete Rx operator parity. Timed operators, multicast subjects, variadic merge, a closed typed stream-error event ABI, and enforceable pending-writer credits need additional work.
+This is an initial pull-oriented implementation, not complete Rx operator parity. Timed operators, multicast subjects, variadic merge, a closed typed stream-error event ABI, and static enforcement for callers that choose the legacy Future-returning sender API need additional work.
 
 ## Validation
 
