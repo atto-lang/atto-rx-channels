@@ -66,23 +66,19 @@ define class Subscription<T> as
   // while self.pull(), self.dispose(), or any awaited user callback runs.
   val Channel<bool> state_busy = Channel.new<bool>(1);
 
-  pub next(): Option<T> {
-    // Make the initial OPEN test and the single-flight pull claim atomic.
-    // The control token is always removed, including on early returns.
+  // Non-panicking data path for ordinary upstream failure. Panic/raise and
+  // runtime cancellation remain stronger control channels and are not Err data.
+  pub next_result(): Result<Option<T>, Object> {
     writech self.state_busy, true;
     try {
       if marked(self.failed); then
-        val Result<Option<T>, String> prior_failure =
-            Err("subscription previously failed");
-        return prior_failure.expect("rx_channels.Subscription.next");
+        return Err("subscription previously failed");
       fi
       if marked(self.cancelled) || marked(self.finished); then
-        return None;
+        return Ok(None);
       fi
       if !(try writech self.pulling, true); then
-        val Result<bool, String> failure =
-            Err("only one outstanding next() is allowed");
-        failure.expect("rx_channels.Subscription.next");
+        return Err("only one outstanding next() is allowed");
       fi
     } finally {
       try readch self.state_busy;
@@ -90,27 +86,52 @@ define class Subscription<T> as
 
     val Channel<bool> settled = Channel.new<bool>(1);
     try {
-      val Option<T> frame = self.pull();
-      if frame.is_none(); then
-        self.claim_finished();
-        self.dispose_once();
-      fi
-      try writech settled, true;
-      if self.is_cancelled(); then
-        return None;
-      fi
-      return frame;
+      val Result<Option<T>, Object> pulled = self.pull_result();
+      match pulled
+        Ok(frame) -> {
+          if frame.is_none(); then
+            self.claim_finished();
+            self.dispose_once();
+          fi
+          try writech settled, true;
+          if self.is_cancelled(); then
+            return Ok(None);
+          fi
+          return Ok(frame);
+        }
+        Err(err) -> {
+          self.claim_failed();
+          self.dispose_once();
+          try writech settled, true;
+          return Err(err);
+        }
+      end
     } catch (err) {
       self.claim_failed();
       self.dispose_once();
-      val Result<Option<T>, Object> failure = Err(err);
-      return failure.expect("rx_channels upstream failed");
+      try writech settled, true;
+      return Err(err);
     } finally {
       if !marked(settled); then
         self.claim_failed();
         self.dispose_once();
       fi
       try readch self.pulling;
+    }
+  }
+
+  // Compatibility projection. Prefer next_result() whenever ordinary upstream
+  // failure must remain recoverable data rather than becoming a panic.
+  pub next(): Option<T> {
+    val Result<Option<T>, Object> outcome = self.next_result();
+    return outcome.expect("rx_channels upstream failed");
+  }
+
+  pub pull_result(): Result<Option<T>, Object> {
+    try {
+      return Ok(self.pull());
+    } catch (err) {
+      return Err(err);
     }
   }
 
