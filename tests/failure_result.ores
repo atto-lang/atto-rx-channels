@@ -34,7 +34,15 @@ pub async fnc main(): void {
   val Subscription<int> mapped_sub = mapped.subscribe();
   stdio.println(mapped_sub.next_result().is_err());
 
-  val Result<Option<int>, Object> first_result = rx_channels.first_result(source);
+  val Fnc<int, bool> positive = |x| -> { return x > 0; };
+  val Observable<int> filtered = rx_channels.filter(new BrokenObservable(), positive);
+  stdio.println(filtered.subscribe().next_result().is_err());
+
+  val Observable<int> taken = rx_channels.take(new BrokenObservable(), 1);
+  stdio.println(taken.subscribe().next_result().is_err());
+
+  val Result<Option<int>, Object> first_result =
+      rx_channels.first_result(new BrokenObservable());
   stdio.println(first_result.is_err());
   return;
 }
