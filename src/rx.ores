@@ -709,18 +709,54 @@ pub fnc merge_channels<T>(Channel<Option<T>> left, Channel<Option<T>> right): Ob
   return new MergeObservable<T>(left, right);
 }
 
-// Future producers keep their own lifetime. Cancellation of this adapter does
-// not cancel the shared Future; an already pending pull waits for settlement.
+// Future producers keep their own lifetime. This subscription selects
+// atomically between its private cancellation signal and the borrowed Future.
+// A stop-channel win detaches the select's Future waiter without cancelling
+// the producer Future; a Future failure remains Result.Err through pull_result.
 define class FutureSubscription<T> extends Subscription<T> as
   val Future<T> pending;
   val Channel<bool> emitted = Channel.new<bool>(1);
-  constructor(Future<T> pending) { self.pending = pending; }
-  pub pull(): Option<T> {
+  val Channel<bool> stopped = Channel.new<bool>(1);
+  val SelectSet cases;
+
+  constructor(Future<T> pending) {
+    self.pending = pending;
+    self.cases = SelectSet.new([
+      SelectCase.read(self.stopped),
+      SelectCase.future(pending)
+    ]);
+  }
+
+  pub pull_result(): Result<Option<T>, Object> {
     if !(try writech self.emitted, true); then
-      return None;
+      return Ok(None);
     fi
-    val T value = await self.pending;
-    return Some(value);
+    try {
+      val Option<SelectResult> selected_option =
+          await (nb select first from self.cases);
+      if selected_option.is_none(); then
+        return Ok(None);
+      fi
+      val SelectResult selected = selected_option.unwrap();
+      if selected.index == 0; then
+        return Ok(None);
+      fi
+      val T value = selected.value;
+      return Ok(Some(value));
+    } catch (err) {
+      return Err(err);
+    }
+  }
+
+  pub pull(): Option<T> {
+    return self.pull_result().expect("rx_channels.FutureSubscription.pull");
+  }
+
+  pub dispose(): void {
+    // Selection cancellation is local to this subscription: the Future case
+    // loses and detaches its waiter; the shared producer Future stays alive.
+    try writech self.stopped, true;
+    return;
   }
 end
 
