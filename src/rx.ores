@@ -56,34 +56,49 @@ define class Subscription<T> as
   val Channel<bool> pulling = Channel.new<bool>(1);
   val Channel<bool> disposed = Channel.new<bool>(1);
 
+  // A capacity-one write-held mutex. The token is placed on acquire and
+  // removed on release; unlike marked(), admission and terminal claims are
+  // observed in the same serialized critical section. Do not hold this
+  // while self.pull(), self.dispose(), or any awaited user callback runs.
+  val Channel<bool> state_busy = Channel.new<bool>(1);
+
   pub next(): Option<T> {
-    if marked(self.cancelled) || marked(self.finished); then
-      return None;
-    fi
-    if !(try writech self.pulling, true); then
-      val Result<bool, String> failure = Err("only one outstanding next() is allowed");
-      failure.expect("rx_channels.Subscription.next");
-    fi
+    // Make the initial OPEN test and the single-flight pull claim atomic.
+    // The control token is always removed, including on early returns.
+    writech self.state_busy, true;
+    try {
+      if marked(self.cancelled) || marked(self.finished); then
+        return None;
+      fi
+      if !(try writech self.pulling, true); then
+        val Result<bool, String> failure =
+            Err("only one outstanding next() is allowed");
+        failure.expect("rx_channels.Subscription.next");
+      fi
+    } finally {
+      try readch self.state_busy;
+    }
+
     val Channel<bool> settled = Channel.new<bool>(1);
     try {
       val Option<T> frame = self.pull();
       if frame.is_none(); then
-        try writech self.finished, true;
+        self.claim_finished();
         self.dispose_once();
       fi
       try writech settled, true;
-      if marked(self.cancelled); then
+      if self.is_cancelled(); then
         return None;
       fi
       return frame;
     } catch (err) {
-      try writech self.finished, true;
+      self.claim_finished();
       self.dispose_once();
       val Result<Option<T>, Object> failure = Err(err);
       return failure.expect("rx_channels upstream failed");
     } finally {
       if !marked(settled); then
-        try writech self.finished, true;
+        self.claim_finished();
         self.dispose_once();
       fi
       try readch self.pulling;
@@ -98,9 +113,22 @@ define class Subscription<T> as
     return;
   }
 
-  // All termination paths share one cleanup claim, including pending-pull
-  // cancellation, natural completion, and the panic/finally path.
-  // Internal cleanup claim; consumers should use cancel().
+  // Claim normal completion only if cancellation has not already won.
+  // A completion racing with cancel() uses one serialized terminal order.
+  claim_finished(): bool {
+    writech self.state_busy, true;
+    try {
+      if marked(self.cancelled) || marked(self.finished); then
+        return false;
+      fi
+      return try writech self.finished, true;
+    } finally {
+      try readch self.state_busy;
+    }
+  }
+
+  // Disposal is claimed at most once across completion/failure/cancel.
+  // No state_busy held across disposal: subclasses may signal select.
   dispose_once(): void {
     if !(try writech self.disposed, true); then
       return;
@@ -109,32 +137,52 @@ define class Subscription<T> as
     return;
   }
 
-  pub is_cancelled(): bool { return marked(self.cancelled); }
-  pub is_complete(): bool { return marked(self.finished) && !marked(self.cancelled); }
+  pub is_cancelled(): bool {
+    writech self.state_busy, true;
+    try {
+      return marked(self.cancelled);
+    } finally {
+      try readch self.state_busy;
+    }
+  }
+
+  pub is_complete(): bool {
+    writech self.state_busy, true;
+    try {
+      return marked(self.finished) && !marked(self.cancelled);
+    } finally {
+      try readch self.state_busy;
+    }
+  }
 
   pub next_event(): StreamEvent<T> {
     val Option<T> frame = self.next();
     if frame.is_some(); then
       return new StreamEvent<T>("next", frame);
     fi
-    if marked(self.cancelled); then
+    if self.is_cancelled(); then
       return new StreamEvent<T>("cancelled", None);
     fi
     return new StreamEvent<T>("complete", None);
   }
 
   pub cancel(): bool {
-    if marked(self.cancelled) || marked(self.finished); then
-      return false;
+    writech self.state_busy, true;
+    let bool claimed = false;
+    try {
+      if marked(self.cancelled) || marked(self.finished); then
+        return false;
+      fi
+      claimed = try writech self.cancelled, true;
+    } finally {
+      try readch self.state_busy;
+    }
+    if claimed; then
+      self.dispose_once();
     fi
-    if !(try writech self.cancelled, true); then
-      return false;
-    fi
-    self.dispose_once();
-    return true;
+    return claimed;
   }
 end
-
 define class Observable<T> as
   pub subscribe(): Subscription<T> {
     return new Subscription<T>();
