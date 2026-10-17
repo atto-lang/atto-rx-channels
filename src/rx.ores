@@ -121,7 +121,8 @@ define class Subscription<T> as
       if marked(self.cancelled) || marked(self.finished); then
         return false;
       fi
-      return try writech self.finished, true;
+      val bool claimed = try writech self.finished, true;
+      return claimed;
     } finally {
       try readch self.state_busy;
     }
