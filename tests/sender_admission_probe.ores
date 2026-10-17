@@ -1,0 +1,19 @@
+import * as rx_channels from '../src/rx.ores';
+import class FramedPipe, Subscription, StreamEvent from '../src/rx.ores';
+
+pub async fnc main(): void {
+  val Option<int> witness = None;
+  val FramedPipe<int> pipe = rx_channels.framed_pipe(2, witness);
+  stdio.println(pipe.is_complete());
+  val Future<void> first = pipe.send(12);
+  await first;
+  stdio.println(pipe.is_complete());
+  val Future<void> done = pipe.complete();
+  await done;
+  stdio.println(pipe.is_complete());
+  val Subscription<int> sub = pipe.subscribe();
+  stdio.println(sub.next().unwrap());
+  val StreamEvent<int> end_event = sub.next_event();
+  stdio.println(end_event.is_complete());
+  return;
+}
