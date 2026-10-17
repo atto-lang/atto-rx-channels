@@ -238,26 +238,52 @@ pub fnc from_values<T>(Array<T> values): Observable<T> {
 define class FramedSender<T> as
   val Channel<Option<T>> output;
   val Channel<bool> terminal = Channel.new<bool>(1);
+  // Protect terminal probing and admission as one source-level critical turn.
+  // NEVER hold this permit while awaiting the admitted Future<void>: a
+  // capacity-zero channel needs its consumer to make forward progress.
+  val Channel<bool> admission = Channel.new<bool>(1);
 
-  constructor(Channel<Option<T>> output) { self.output = output; }
+  constructor(Channel<Option<T>> output) {
+    self.output = output;
+    writech self.admission, true;
+  }
 
-  pub is_complete(): bool { return marked(self.terminal); }
+  pub is_complete(): bool {
+    val bool permit = readch self.admission;
+    try {
+      return marked(self.terminal);
+    } finally {
+      writech self.admission, permit;
+    }
+  }
 
   pub send(T value): Future<void> {
-    if marked(self.terminal); then
-      val Result<bool, String> failure = Err("send after completion");
-      failure.expect("rx_channels.FramedSender.send");
-    fi
-    return nb writech self.output, Some(value);
+    val bool permit = readch self.admission;
+    try {
+      if marked(self.terminal); then
+        val Result<bool, String> failure = Err("send after completion");
+        failure.expect("rx_channels.FramedSender.send");
+      fi
+      // Admission is ordered among this sender's methods. Callers must still
+      // await returned Futures to bound pending writes and observe failures.
+      return nb writech self.output, Some(value);
+    } finally {
+      writech self.admission, permit;
+    }
   }
 
   pub complete(): Future<void> {
-    if !(try writech self.terminal, true); then
-      val Result<bool, String> failure = Err("duplicate completion");
-      failure.expect("rx_channels.FramedSender.complete");
-    fi
-    val Option<T> end_frame = None;
-    return nb writech self.output, end_frame;
+    val bool permit = readch self.admission;
+    try {
+      if !(try writech self.terminal, true); then
+        val Result<bool, String> failure = Err("duplicate completion");
+        failure.expect("rx_channels.FramedSender.complete");
+      fi
+      val Option<T> end_frame = None;
+      return nb writech self.output, end_frame;
+    } finally {
+      writech self.admission, permit;
+    }
   }
 end
 
