@@ -360,10 +360,15 @@ define class FramedSender<T> as
   // NEVER hold this permit while awaiting the admitted Future<void>: a
   // capacity-zero channel needs its consumer to make forward progress.
   val Channel<bool> admission = Channel.new<bool>(1);
+  // Strong backpressure path: one source-level delivery may be awaiting
+  // settlement at a time. Legacy send()/complete() remain Future-returning
+  // compatibility APIs and can bypass this credit if callers use them directly.
+  val Channel<bool> delivery_credit = Channel.new<bool>(1);
 
   constructor(Channel<Option<T>> output) {
     self.output = output;
     writech self.admission, true;
+    writech self.delivery_credit, true;
   }
 
   pub is_complete(): bool {
@@ -403,6 +408,28 @@ define class FramedSender<T> as
       writech self.admission, permit;
     }
   }
+
+  // Preferred bounded-registration path. "_blocking" means the Ores
+  // continuation suspends; it never parks a carrier thread.
+  pub send_blocking(T value): void {
+    val bool credit = readch self.delivery_credit;
+    try {
+      val Future<void> delivery = self.send(value);
+      await delivery;
+    } finally {
+      writech self.delivery_credit, credit;
+    }
+  }
+
+  pub complete_blocking(): void {
+    val bool credit = readch self.delivery_credit;
+    try {
+      val Future<void> delivery = self.complete();
+      await delivery;
+    } finally {
+      writech self.delivery_credit, credit;
+    }
+  }
 end
 
 // The transport and sender never escape; one producer, one subscriber.
@@ -418,6 +445,8 @@ define class FramedPipe<T> extends Observable<T> as
 
   pub send(T value): Future<void> { return self.writer.send(value); }
   pub complete(): Future<void> { return self.writer.complete(); }
+  pub send_blocking(T value): void { self.writer.send_blocking(value); return; }
+  pub complete_blocking(): void { self.writer.complete_blocking(); return; }
   pub is_complete(): bool { return self.writer.is_complete(); }
 
   pub subscribe(): Subscription<T> {
