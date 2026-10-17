@@ -57,7 +57,8 @@ Imports of generic functions currently use the module-qualified direct-call form
 | `filter(Observable<T>, Fnc<T, bool>)` | Iterative pulls until a predicate accepts; the callback receives temporary read access |
 | `take(Observable<T>, int)` | At most N items, then cancels upstream |
 | `merge_channels(left, right)` | Fair deterministic merging of two channel inputs |
-| `first(Observable<T>)` | Compatibility helper returning `Option<T>`; cancellation in `finally` |
+| `first_result(Observable<T>)` | **Recoverable path:** `Result<Option<T>, Object>`; cancellation in `finally` |
+| `first(Observable<T>)` | Compatibility helper returning `Option<T>`; panics on `Err`; cancellation in `finally` |
 | `first_required(Observable<T>)` | Returns `T`, fails on empty rather than returning `None` (native Future-valued `first()` is a future integration target) |
 | `framed_pipe(capacity, typedNone)` | **Preferred:** privately owns one writer/channel and admits one subscriber |
 | `pipe.send(value)` / `pipe.complete()` | Bounded writes, rejects duplicate completion and writes after completion |
@@ -65,12 +66,14 @@ Imports of generic functions currently use the module-qualified direct-call form
 | `framed_sender(Channel<Option<T>>)` | Creates checked `FramedSender<T>` for ordered terminal writes |
 | `writer.send(value)` | Rejects sends after completion; returns bounded write `Future<void>` |
 | `writer.complete()` | Claims termination exactly once and writes `None`; repeats fail |
-| `subscription.next_event()` | Legacy `StreamEvent<T>` projection: `next`, `complete`, or `cancelled` only; constructor rejects illegal kind/payload pairs, but **not yet a typed failure event** |
-| `subscription.is_complete()/is_cancelled()` | Query terminal cause without conflating cancellation with normal completion |
+| `subscription.next_event_result()` | **Recoverable path:** `Result<StreamEvent<T>, Object>`; `Err` is never rewritten to `complete` |
+| `subscription.next_event()` | Legacy compatibility projection; panics on `Err`; event tags remain `next`, `complete`, or `cancelled` only |
+| `subscription.is_complete()/is_cancelled()/is_failed()` | Query mutually arbitrated terminal state; failure is not completion |
 | `send(channel, value)` | Legacy **unchecked** raw helper; caller must uphold terminal protocol |
 | `complete(channel)` | Legacy **unchecked** raw helper; does not close the channel |
 | `observable.subscribe()` | Creates an independent subscription state |
-| `subscription.next()` | Suspends until data/completion/failure; one outstanding pull |
+| `subscription.next_result()` | **Recoverable path:** `Result<Option<T>, Object>`; one outstanding pull; `Err` is terminal failure data |
+| `subscription.next()` | Compatibility wrapper around `next_result()`; panics on ordinary `Err` |
 | `subscription.cancel()` | Idempotent cancellation; returns true only once |
 
 Oreslang's source ownership model is pointerless. Callback types stay ordinary, for example `Fnc<int, bool>` or `Fnc<T, bool>`; a first-class callback call receives temporary read access without encoding a C/Rust-style pointer type. If code needs a named borrow beyond one call expression it uses `rt borrow value`, not `&value`.
@@ -95,16 +98,19 @@ This prevents accidental malformed *objects* but does not supply
 typed `Error(E)` events. The existing `marked()` read-and-restore helper
 is intrinsically non-atomic; it is valid only while a dedicated source-level
 state permit serializes all accesses to that marker, or when a marker has
-exactly one owner. The `Subscription` methods `next()`, `cancel()`,
-`is_complete()`, `is_cancelled()`, and `claim_finished()` now protect
+exactly one owner. The `Subscription` methods `next_result()`, `cancel()`, `is_complete()`,
+`is_cancelled()`, `is_failed()`, `claim_finished()`, and `claim_failed()` now protect
 marker observations/terminal claims with a separate short-lived
 `state_busy` capacity-one channel. That permit is **not held during**
 `pull()`, user callbacks, or `dispose()`. A cancelled pull may have
 already consumed a frame that cannot be undone. This is a candidate
 source-level state protocol, **not** proven race-free guest execution.
 
-Still missing: typed terminal errors; cancellation wakeup for borrowed
-Futures; bounded pending write credits; rigorous multi-producer handling,
+`next_result()` and `next_event_result()` now preserve ordinary upstream
+failures as `Result.Err(Object)` through `map`, `filter`, and `take`, while
+legacy `next()` / `next_event()` deliberately remain panicking compatibility
+wrappers. Still missing: a closed typed `StreamEvent.Error<E>` variant;
+cancellation wakeup for borrowed Futures; bounded pending write credits; rigorous multi-producer handling,
 cross-actor isolation and scheduler-level race tests. Until real pinned
 compiler tests run, do not advertise lossless
 `Observable`/`Stream`/`Channel` conversion or full parity.
@@ -121,8 +127,8 @@ read-and-restored markers outside any common gate.
 A short-lived `state_busy` write-held permit now covers:
 
 - OPEN/terminal check together with the one-outstanding-pull admission
-- cancellation versus natural-completion terminal claims
-- `is_complete()` and `is_cancelled()` state observations
+- cancellation versus natural-completion-versus-failure terminal claims
+- `is_complete()`, `is_cancelled()`, and `is_failed()` state observations
 
 Pending `pull()` remains outside the permit so a cancelling task can enter,
 claim cancellation and invoke `dispose_once()`. A terminal-state claim
