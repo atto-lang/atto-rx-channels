@@ -14,7 +14,7 @@ source .work/env.sh
 python3 scripts/test.py
 ```
 
-`compiler.lock` pins the exact reference compiler revision. This branch requires the merged Future/select work plus the pointerless first-class `Fnc<T,...>` ownership convergence and the data-only Channel payload boundary: callback calls temporarily read-borrow ordinary arguments, while explicit ownership operations use the reserved `rt copy`, `rt share`, `rt borrow`, and `rt take` surface. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
+`compiler.lock` pins exact Java integration commit `52c897340795394a9bdca36955f2a3a4579ba59b` (draft Java PR #1188), stacked on the exact-tree-verified Future/channel select runtime from Java #880 while restoring Rx's recursively data-only `Channel<T>` callable boundary. This pin is intentionally **draft-only** until the integration head itself runs JDK25/full Maven. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
 
 You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/classes` plus its Maven dependency classpath. Set `JAVA` to the Java executable if necessary.
 
@@ -109,8 +109,7 @@ source-level state protocol, **not** proven race-free guest execution.
 `next_result()` and `next_event_result()` now preserve ordinary upstream
 failures as `Result.Err(Object)` through `map`, `filter`, and `take`, while
 legacy `next()` / `next_event()` deliberately remain panicking compatibility
-wrappers. Still missing: a closed typed `StreamEvent.Error<E>` variant;
-cancellation wakeup for borrowed Futures; bounded pending write credits; rigorous multi-producer handling,
+wrappers. `FutureSubscription` now uses an atomic stop-channel/Future select so cancellation can detach its waiter without cancelling the borrowed producer. Still missing: a closed typed `StreamEvent.Error<E>` variant; bounded pending write credits; rigorous multi-producer handling,
 cross-actor isolation and scheduler-level race tests. Until real pinned
 compiler tests run, do not advertise lossless
 `Observable`/`Stream`/`Channel` conversion or full parity.
@@ -131,11 +130,13 @@ A short-lived `state_busy` write-held permit now covers:
 - `is_complete()`, `is_cancelled()`, and `is_failed()` state observations
 
 Pending `pull()` remains outside the permit so a cancelling task can enter,
-claim cancellation and invoke `dispose_once()`. A terminal-state claim
-does not itself prove that every host Future wait is interruptible. In
-particular `FutureSubscription.pull()` still awaits its borrowed producer
-without a cancellation-aware select registration: it may finish only when
-the producer's Future settles. Do not claim bounded cancellation latency.
+claim cancellation and invoke `dispose_once()`. `FutureSubscription` no longer
+raw-awaits its producer: it selects between `SelectCase.read(stopped)` and
+`SelectCase.future(pending)`. A stop win detaches the Future waiter without
+cancelling the shared producer. This relies on compiler integration #1188;
+its base primitive is exact-tree tested in Java #880, but this Rx exact head
+has not yet executed under the pinned compiler, so bounded cancellation latency
+is still an **unverified integration claim**, not release evidence.
 
 Even the short state permit is backed by normal channel wait registrations;
 this implementation has no independently proven bound on an adversarial
@@ -155,16 +156,16 @@ enforce execution-domain confinement and admission budgets.
 - Cancellation leaves the producer's channel open and preserves values not claimed by a winning selection. A read that already won a race may have consumed its value before cancellation.
 - For backward compatibility, `next(): Option<T>` returns `None` on both cancellation and natural completion. Prefer `next_event()` for explicit `NEXT`/`COMPLETE`/`CANCELLED` states. Failures are propagated, never encoded as `COMPLETE`. This does **not** yet replicate the native `OresFuture` cancellation state in `next()`.
 - Termination cleanup is claimed exactly once across completion, failure, and explicit cancellation. `cancel()` after natural completion returns false, and does not re-dispose a completed subscription.
-- Future sources retain the producer's lifetime. Cancelling an adapter does not cancel its shared Future; an already pending Future pull waits for settlement and then discards its value if cancelled. Channel sources are the adapter for prompt cancellation of a pending read.
-- Operator/Future failures propagate through source suspension; they are not emitted as data or mistaken for normal completion. Ordinary guest failures use `Result.expect` because this compiler has no guest `throw`/rethrow statement. `finally` clears demand and disposes upstream even when a language panic bypasses `catch`.
+- Future sources retain the producer's lifetime. `FutureSubscription` atomically selects its private stop channel against the shared Future; cancellation signals stop, the losing Future listener is detached, and the producer Future remains independently awaitable. If the Future already won, the subscription's terminal-state check suppresses post-cancel delivery.
+- Ordinary operator/Future failures use the recoverable `Result` path: `next_result()`, `next_event_result()`, operator `pull_result()`, and `first_result()` preserve `Err(Object)` without converting it to completion. Legacy `next()`, `next_event()`, operator `pull()`, and `first()` remain compatibility wrappers that use `Result.expect`. `finally` clears demand and disposes upstream even when a stronger panic/cancellation signal bypasses ordinary `catch`.
 - `Array<T>` is move-only on the pinned compiler. `from_values` accepts ownership of that array, so the caller must not access or mutate it after transfer. `rt copy` on move-only arrays is **not yet supported** without `Symbol.rtCopy` lowering, and must not be silently treated as a shallow alias. Replay shares the captured collection across subscriptions; nested mutable objects still require explicit safe ownership or immutability. Use channels for owned mutable payloads.
 - Channels and subscriptions stay in their execution domain. They cannot cross actor mailboxes; use ActorRef/mailbox protocols for actor-to-actor transport. Function/closure values are deliberately not channel payloads: callbacks remain local and channels carry data. Structured actor cancellation remains runtime-owned.
 
-This is an initial pull-oriented implementation, not complete Rx operator parity. Timed operators, multicast subjects, variadic merge, and shared-Future cancellation need additional work.
+This is an initial pull-oriented implementation, not complete Rx operator parity. Timed operators, multicast subjects, variadic merge, a closed typed stream-error event ABI, and enforceable pending-writer credits need additional work.
 
 ## Validation
 
-The test runner type/ownership-checks the library, examples, and every test program, then executes each with a timeout and checks exact output or an expected failure. Coverage includes replay and array ownership rejection, completion ordering, checked sender double-close/send-after-close rejection, natural completion vs cancellation events, cleanup-at-most-once, `first_required` on present/empty sources, operator composition, no prefetch, fair merge, rendezvous backpressure, Future adaptation, upstream failure, and invalid take counts. The existing `.github/workflows/test.yml` builds the pinned compiler and runs the suite when its `ORES_COMPILER_READ_TOKEN` read-only secret is present. Since a default `GITHUB_TOKEN` cannot check out private cross-org sources, funded-org regression runs instead mirror the *exact compiler Git tree* and this library's source/tests into the same test repository, verify compiler blob identity, and run there with no cross-org checkout secret. Local validation uses existing Git authentication.
+The test runner type/ownership-checks the library, examples, and every test program, then executes each with a timeout and checks exact output or an expected failure. Coverage includes replay and array ownership rejection, completion ordering, checked sender double-close/send-after-close rejection, natural completion vs cancellation events, cleanup-at-most-once, `first_required` on present/empty sources, operator composition, no prefetch, fair merge, rendezvous backpressure, Future adaptation, upstream failure, and invalid take counts. The existing `.github/workflows/test.yml` builds the pinned compiler and runs the suite when its `ORES_COMPILER_READ_TOKEN` read-only secret is present. Historical funded Java regressions used exact-tree private mirrors and blob-identity checks. In this audit, a fresh alternate private runner was verified and a source-free protocol oracle passed, but the attempted full private Rx/compiler mirror was blocked by a safety check and was not bypassed. Therefore no current Rx guest-runtime pass is claimed. Local validation uses existing Git authentication.
 
 ## Compiler compatibility checkpoint (2026-10-06)
 
