@@ -39,6 +39,31 @@ class SubscriptionFailureAdmission(unittest.TestCase):
         )
         self.assertIn("self.claim_failed();", cleanup)
 
+    def test_failed_subscription_is_checked_before_eof(self):
+        text = SOURCE.read_text(encoding="utf-8")
+        subscription = text.split("define class Subscription<T> as", 1)[1].split(
+            "define class Observable<T> as", 1
+        )[0]
+        next_method = subscription.split("pub next(): Option<T>", 1)[1].split(
+            "pub pull(): Option<T>", 1
+        )[0]
+        self.assertLess(
+            next_method.index("marked(self.failed)"),
+            next_method.index("marked(self.cancelled)")
+        )
+        self.assertIn("subscription previously failed", next_method)
+
+    def test_all_terminal_claims_exclude_failed_state(self):
+        text = SOURCE.read_text(encoding="utf-8")
+        subscription = text.split("define class Subscription<T> as", 1)[1].split(
+            "define class Observable<T> as", 1
+        )[0]
+        finished = subscription.split("claim_finished(): bool", 1)[1].split(
+            "claim_failed(): bool", 1
+        )[0]
+        cancel = subscription.split("pub cancel(): bool", 1)[1]
+        self.assertIn("marked(self.failed)", finished)
+        self.assertIn("marked(self.failed)", cancel)
     def test_failure_status_is_never_natural_complete(self):
         text = SOURCE.read_text(encoding="utf-8")
         subscription = text.split("define class Subscription<T> as", 1)[1].split(
