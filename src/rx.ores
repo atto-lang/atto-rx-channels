@@ -736,16 +736,20 @@ pub fnc from_future<T>(Future<T> pending): Observable<T> {
 
 // Compatibility view: empty is None. Use first_required for a failed
 // stream-style first() when no element exists.
-pub fnc first<T>(Observable<T> source): Option<T> {
+pub fnc first_result<T>(Observable<T> source): Result<Option<T>, Object> {
   val Subscription<T> sub = source.subscribe();
   try {
-    return sub.next();
+    return sub.next_result();
   } catch (err) {
-    val Result<Option<T>, Object> failure = Err(err);
-    return failure.expect("rx_channels.first upstream failed");
+    return Err(err);
   } finally {
     sub.cancel();
   }
+}
+
+pub fnc first<T>(Observable<T> source): Option<T> {
+  val Result<Option<T>, Object> outcome = first_result(source);
+  return outcome.expect("rx_channels.first upstream failed");
 }
 
 pub fnc first_required<T>(Observable<T> source): T {
