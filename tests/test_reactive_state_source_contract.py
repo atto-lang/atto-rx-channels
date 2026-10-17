@@ -31,7 +31,7 @@ class ReactiveStateSourceContract(unittest.TestCase):
             r"writech self\.state_busy, true;([\s\S]*?)try readch self\.state_busy;",
             self.subscription,
         )
-        self.assertEqual(len(windows), 5)
+        self.assertEqual(len(windows), 7)
         for section in windows:
             for forbidden in ("self.pull()", "self.dispose()", "await "):
                 self.assertNotIn(forbidden, section)
@@ -56,13 +56,23 @@ class ReactiveStateSourceContract(unittest.TestCase):
         claim = self.method("claim_finished(): bool", "dispose_once(): void")
         self.assertIn("marked(self.cancelled)", claim)
         self.assertIn("marked(self.finished)", claim)
+        self.assertIn("marked(self.failed)", claim)
         self.assertLess(claim.index("marked(self.cancelled)"),
                         claim.index("try writech self.finished, true"))
+
+    def test_failure_claim_cannot_override_cancel_or_completion(self):
+        claim = self.method("claim_failed(): bool", "dispose_once(): void")
+        self.assertIn("marked(self.cancelled)", claim)
+        self.assertIn("marked(self.finished)", claim)
+        self.assertIn("marked(self.failed)", claim)
+        self.assertLess(claim.index("marked(self.failed)"),
+                        claim.index("try writech self.failed, true"))
 
     def test_terminal_probes_are_in_private_state_gate(self):
         for name, end in (
             ("pub is_cancelled(): bool", "pub is_complete(): bool"),
-            ("pub is_complete(): bool", "pub next_event(): StreamEvent<T>"),
+            ("pub is_complete(): bool", "pub is_failed(): bool"),
+            ("pub is_failed(): bool", "pub next_event(): StreamEvent<T>"),
         ):
             method = self.method(name, end)
             self.assertIn("writech self.state_busy, true;", method)
