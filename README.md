@@ -18,6 +18,20 @@ python3 scripts/test.py
 
 You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/classes` plus its Maven dependency classpath. Set `JAVA` to the Java executable if necessary.
 
+## Experimental typed credit-gated transport
+
+`src/credit_stream.ores` defines draft `CreditPipe<T,E>`, stacked on the
+hardened subscription/runtime work above. Its preferred public terminal surface
+is the same closed signal shape as `Subscription.next_signal()`, but typed in
+`E`: `Result<Option<T>, Option<E>>`.
+
+`Ok(Some(T))` is NEXT, `Ok(None)` COMPLETE, `Err(None)` CANCELLED, and
+`Err(Some(E))` explicit typed ERROR. One `request()` admits exactly one
+publisher event, and private serialized state gates bound one reader and one
+writer registration. See [credit stream v2](docs/credit-stream-v1.md).
+
+This remains draft-only until Java #1193 and this exact Rx head execute.
+
 ## Channel source with async/await
 
 ```ores
