@@ -1,0 +1,9 @@
+import * as credit from '../src/credit_stream.ores';
+import class CreditPipe from '../src/credit_stream.ores';
+pub async fnc main(): void {
+  val Option<Fnc<int, int>> value_type = None;
+  val Option<String> error_type = None;
+  val CreditPipe<Fnc<int, int>, String> bad =
+      credit.credit_pipe(1, value_type, error_type);
+  return;
+}
