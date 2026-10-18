@@ -115,7 +115,11 @@ class ReactiveStateSourceContract(unittest.TestCase):
         )
         self.assertEqual(len(windows), 3)
         for section in windows:
-            self.assertNotRegex(section, r"\bawait\b")
+            code_only = "\n".join(
+                line for line in section.splitlines()
+                if not line.lstrip().startswith("//")
+            )
+            self.assertNotRegex(code_only, r"\bawait\b")
 
 
 if __name__ == "__main__":
