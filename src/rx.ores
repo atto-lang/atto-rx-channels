@@ -121,10 +121,20 @@ define class Observable<T> as
   }
 end
 
+// One consumer per ChannelObservable: a channel is a queue, not a broadcast.
+// The claim is never read back, so concurrent subscribe attempts cannot
+// steal one another's unicast subscription slot.
 define class ChannelObservable<T> extends Observable<T> as
   val Channel<Option<T>> input;
+  val Channel<bool> subscribed = Channel.new<bool>(1);
   constructor(Channel<Option<T>> input) { self.input = input; }
-  pub subscribe(): Subscription<T> { return new ChannelSubscription<T>(self.input); }
+  pub subscribe(): Subscription<T> {
+    if !(try writech self.subscribed, true); then
+      val Result<bool, String> failure = Err("only one subscriber is allowed");
+      failure.expect("rx_channels.ChannelObservable.subscribe");
+    fi
+    return new ChannelSubscription<T>(self.input);
+  }
 end
 
 define class ValuesObservable<T> extends Observable<T> as
