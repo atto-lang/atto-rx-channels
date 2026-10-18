@@ -1,0 +1,11 @@
+import * as rx_channels from '../src/rx.ores';
+import class Observable, Subscription from '../src/rx.ores';
+pub async fnc main(): void {
+  val Channel<Option<int>> input = Channel.new<Option<int>>(1);
+  val Observable<int> source = rx_channels.from_channel(input);
+  val Subscription<int> first = source.subscribe();
+  // A second consumer would race for the one terminal None frame.
+  val Subscription<int> second = source.subscribe();
+  stdio.println(second.next().is_none());
+  return;
+}
