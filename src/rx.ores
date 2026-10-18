@@ -100,16 +100,25 @@ define class Subscription<T> as
           return Ok(frame);
         }
         Err(err) -> {
-          self.claim_failed();
+          // Failure is only observable if it wins the serialized terminal
+          // claim. A cancellation/completion that already won must not be
+          // overwritten by a later upstream error from the in-flight pull.
+          val bool failed_now = self.claim_failed();
           self.dispose_once();
           try writech settled, true;
+          if !failed_now; then
+            return Ok(None);
+          fi
           return Err(err);
         }
       end
     } catch (err) {
-      self.claim_failed();
+      val bool failed_now = self.claim_failed();
       self.dispose_once();
       try writech settled, true;
+      if !failed_now; then
+        return Ok(None);
+      fi
       return Err(err);
     } finally {
       if !marked(settled); then
