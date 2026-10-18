@@ -78,10 +78,20 @@ class ReactiveStateSourceContract(unittest.TestCase):
             self.assertIn("writech self.state_busy, true;", method)
             self.assertIn("try readch self.state_busy;", method)
 
+    def test_checked_sender_exposes_only_credit_bounded_public_delivery(self):
+        source_no_comments = "\n".join(
+            line for line in self.sender.splitlines()
+            if not line.lstrip().startswith("//")
+        )
+        self.assertNotIn("pub send(T value): Future<void>", source_no_comments)
+        self.assertNotIn("pub complete(): Future<void>", source_no_comments)
+        self.assertIn("send_admitted(T value): Future<void>", source_no_comments)
+        self.assertIn("complete_admitted(): Future<void>", source_no_comments)
+
     def test_blocking_sender_holds_one_delivery_credit_until_settlement(self):
         for start, end, operation in (
-            ("pub send_blocking(T value): void", "pub complete_blocking(): void", "self.send(value)"),
-            ("pub complete_blocking(): void", "end", "self.complete()"),
+            ("pub send_blocking(T value): void", "pub complete_blocking(): void", "self.send_admitted(value)"),
+            ("pub complete_blocking(): void", "end", "self.complete_admitted()"),
         ):
             section = self.sender.split(start, 1)[1].split(end, 1)[0]
             acquired = section.index("readch self.delivery_credit")
