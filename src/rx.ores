@@ -387,7 +387,9 @@ pub fnc from_values<T>(Array<T> values): Observable<T> {
 }
 
 // Prefer this owned, checked sender when frame-protocol safety matters.
-// Raw send(channel)/complete(channel) remain legacy unchecked helpers.
+// The checked sender exposes only acknowledged, credit-bounded public
+// delivery. Raw send(channel)/complete(channel) remain legacy unchecked
+// channel helpers and are intentionally outside FramedSender/FramedPipe.
 define class FramedSender<T> as
   val Channel<Option<T>> output;
   val Channel<bool> terminal = Channel.new<bool>(1);
@@ -415,12 +417,14 @@ define class FramedSender<T> as
     }
   }
 
-  pub send(T value): Future<void> {
+  // Internal admission primitive. Public callers must use send_blocking()
+  // so the sender-owned delivery credit remains held until settlement.
+  send_admitted(T value): Future<void> {
     val bool permit = readch self.admission;
     try {
       if marked(self.terminal); then
         val Result<bool, String> failure = Err("send after completion");
-        failure.expect("rx_channels.FramedSender.send");
+        failure.expect("rx_channels.FramedSender.send_blocking");
       fi
       // Admission is ordered among this sender's methods. Callers must still
       // await returned Futures to bound pending writes and observe failures.
@@ -430,12 +434,15 @@ define class FramedSender<T> as
     }
   }
 
-  pub complete(): Future<void> {
+  // Internal terminal admission primitive. Public callers must use
+  // complete_blocking() so terminal delivery is acknowledged before credit
+  // returns to any later operation.
+  complete_admitted(): Future<void> {
     val bool permit = readch self.admission;
     try {
       if !(try writech self.terminal, true); then
         val Result<bool, String> failure = Err("duplicate completion");
-        failure.expect("rx_channels.FramedSender.complete");
+        failure.expect("rx_channels.FramedSender.complete_blocking");
       fi
       val Option<T> end_frame = None;
       return nb writech self.output, end_frame;
@@ -449,7 +456,7 @@ define class FramedSender<T> as
   pub send_blocking(T value): void {
     val bool credit = readch self.delivery_credit;
     try {
-      val Future<void> delivery = self.send(value);
+      val Future<void> delivery = self.send_admitted(value);
       await delivery;
     } finally {
       writech self.delivery_credit, credit;
@@ -459,7 +466,7 @@ define class FramedSender<T> as
   pub complete_blocking(): void {
     val bool credit = readch self.delivery_credit;
     try {
-      val Future<void> delivery = self.complete();
+      val Future<void> delivery = self.complete_admitted();
       await delivery;
     } finally {
       writech self.delivery_credit, credit;
@@ -478,10 +485,14 @@ define class FramedPipe<T> extends Observable<T> as
     self.writer = new FramedSender<T>(self.input);
   }
 
-  pub send(T value): Future<void> { return self.writer.send(value); }
-  pub complete(): Future<void> { return self.writer.complete(); }
-  pub send_blocking(T value): void { self.writer.send_blocking(value); return; }
-  pub complete_blocking(): void { self.writer.complete_blocking(); return; }
+  pub send_blocking(T value): void {
+    self.writer.send_blocking(value);
+    return;
+  }
+  pub complete_blocking(): void {
+    self.writer.complete_blocking();
+    return;
+  }
   pub is_complete(): bool { return self.writer.is_complete(); }
 
   pub subscribe(): Subscription<T> {
