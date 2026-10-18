@@ -453,7 +453,7 @@ define class FramedSender<T> as
 
   // Preferred bounded-registration path. "_blocking" means the Ores
   // continuation suspends; it never parks a carrier thread.
-  pub send_blocking(T value): void {
+  pub suspends send_blocking(T value): void {
     val bool credit = readch self.delivery_credit;
     try {
       val Future<void> delivery = self.send_admitted(value);
@@ -463,7 +463,7 @@ define class FramedSender<T> as
     }
   }
 
-  pub complete_blocking(): void {
+  pub suspends complete_blocking(): void {
     val bool credit = readch self.delivery_credit;
     try {
       val Future<void> delivery = self.complete_admitted();
@@ -485,11 +485,11 @@ define class FramedPipe<T> extends Observable<T> as
     self.writer = new FramedSender<T>(self.input);
   }
 
-  pub send_blocking(T value): void {
+  pub suspends send_blocking(T value): void {
     self.writer.send_blocking(value);
     return;
   }
-  pub complete_blocking(): void {
+  pub suspends complete_blocking(): void {
     self.writer.complete_blocking();
     return;
   }
