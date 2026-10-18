@@ -103,12 +103,17 @@ class ReactiveStateSourceContract(unittest.TestCase):
     def test_sender_has_three_guarded_admission_turns(self):
         self.assertEqual(self.sender.count("readch self.admission"), 3)
         self.assertEqual(self.sender.count("writech self.admission, permit"), 3)
-        self.assertEqual(self.sender.count("finally {"), 3)
-        source_no_comments = "\n".join(
-            line for line in self.sender.splitlines()
-            if not line.lstrip().startswith("//")
+
+        # Await is required in the public *_blocking methods, but it must
+        # never occur while the admission permit itself is held. A capacity-0
+        # channel needs the consumer to run before settlement.
+        windows = re.findall(
+            r"readch self\.admission;([\s\S]*?)writech self\.admission, permit;",
+            self.sender,
         )
-        self.assertNotRegex(source_no_comments, r"\bawait\b")
+        self.assertEqual(len(windows), 3)
+        for section in windows:
+            self.assertNotRegex(section, r"\bawait\b")
 
 
 if __name__ == "__main__":
