@@ -1,14 +1,16 @@
 # BoundedQueue<T> v1 contract
 
-Status: draft source contract. This document does not claim compiler/runtime execution.
+Status: draft source/reference contract. This document does not claim compiler/runtime execution.
 
-## Purpose
+## Purpose and layer boundary
 
-`BoundedQueue<T>` is a userland policy layer over Oreslang `Channel<T>`. It does **not** add another scheduler, mailbox, lock manager, or transport. The channel runtime remains responsible for bounded buffering, rendezvous, waiter retention, atomic select arbitration, cancellation-safe loser removal, and deterministic selection.
+`src/bounded_queue.ores` is the readable source-level reference state machine for the bounded-queue v1 contract. It is intentionally built over `Channel<T>` and adds no scheduler, mailbox, lock manager, or second waiter list.
 
-The queue adds a reusable typed surface for operations that need explicit one-attempt cancellation tickets and close/drain semantics.
+It is **not the final multi-producer capability representation**. Ordinary user classes containing channel handles remain move-only, while a true queue handle must be copyable within one execution domain so independently scheduled local producers can share the same synchronized admission authority. Java draft #2311 implements that first-class runtime reference directly over `ChannelRuntime.Channel<T>`.
 
-## Surface
+The source wrapper remains useful for syntax checking, single-owner semantic fixtures, result/oracle review, and cross-backend contract readability.
+
+## Reference source surface
 
 - `bounded_queue<T>(capacity, typed_none) -> BoundedQueue<T>`
 - `new_ticket() -> Result<QueueTicket, String>`
@@ -19,87 +21,100 @@ The queue adds a reusable typed surface for operations that need explicit one-at
 - `close() -> bool`
 - `is_closed() -> bool`
 
-`_blocking` means the Oreslang continuation may suspend. It never authorizes parking an actor carrier thread.
+`_blocking` means the Oreslang continuation may suspend; it never authorizes parking an actor carrier thread.
 
 ## Ticket contract
 
-A `QueueTicket` is one-shot. It can be cancelled before or while its push attempt is pending. It cannot be reused after any terminal push outcome. Cancellation after settlement returns false.
+A ticket represents one push attempt. Cancellation before admission is sticky; a terminal attempt cannot be reused. Tickets carry the queue generation at issuance. Close advances the generation before closing the item channel, so an unclaimed pre-close ticket is stale.
 
-Tickets carry the queue generation at issuance. Close increments the generation before releasing the queue state permit. An unclaimed ticket issued before close is therefore stale and a later push attempt returns `Err("stale-ticket")`.
+The reference source ticket contains local Channel capabilities and therefore must not cross actor boundaries.
 
-Current v1 tickets are execution-domain-local capabilities because they contain a cancellation channel. They are not actor messages and must not cross actor boundaries.
+The first-class runtime form in Java #2311 strengthens this: a claimed pending ticket delegates cancellation authority to the exact underlying channel-write Future, so cancellation loses atomically once that write selection is committed.
 
 ## Push linearization
 
-`try_push` is immediate and leaves no waiter on `full`.
+`try_push` is immediate and retains no pending writer on `full`.
 
-`push_blocking` performs one priority select:
+The blocking reference path races ticket cancellation against the actual channel write. Queue close is **not** represented by a consumable synthetic close token. Instead, `close()` closes the actual `items` channel.
 
-1. ticket cancellation;
-2. queue close;
-3. queue write admission.
+Therefore the authoritative runtime linearization is:
 
-Therefore a cancellation or close that is already observable at arbitration wins over an uncommitted write. Once the write arm commits, later cancellation cannot revoke the admitted value.
+1. ticket cancellation may win while the write remains uncommitted;
+2. `Channel.close()` may settle an uncommitted pending write as closed;
+3. write commit permanently admits the value.
 
-Multiple blocked callers register independently with the same underlying `Channel<T>`. The channel coordinator owns waiter ordering and cancellation-safe removal. This wrapper does not maintain a second waiter list.
+A committed write cannot later be revoked by cancellation or close.
+
+This avoids the unsafe design where one waiter consumes a "closed" marker and briefly hides closure from another waiter.
 
 ## Receive and close
 
-Receive ordering is FIFO for values already admitted to the underlying channel.
+`Channel.close()` preserves committed buffered values and rejects all later/uncommitted writes under the channel coordinator.
 
-`pop_blocking` gives the item arm priority over close. Closing therefore does not discard already-admitted buffered values:
+Consequently:
 
-- buffered/admitted values drain first;
-- once closed and empty, `pop_blocking()` returns `None`;
-- `try_pop()` returns `Ok(None)` for closed+drained and `Err("empty")` for open+empty.
+- already-admitted values remain FIFO-readable after close;
+- closed + drained is terminal;
+- the reference `try_pop()` maps closed+drained to `Ok(None)`;
+- open+empty remains `Err("empty")`;
+- `pop_blocking()` returns `None` only after closed data is fully drained.
 
-Close is idempotent and rejects new ticket issuance.
+Close is idempotent.
 
-## Result meanings
+## Multiple waiters and fairness
 
-Push errors in this source slice:
+The contract forbids a library-maintained duplicate waiter queue. Multiple pending producers must be represented by the backend's canonical Channel/select waiter machinery.
 
-- `full`: immediate attempt found no capacity; no waiter retained;
-- `cancelled`: ticket cancellation won before write commit;
-- `closed`: queue closure won before write commit;
-- `stale-ticket`: ticket was issued in an earlier queue generation;
-- `ticket-used`: the one-shot ticket was already claimed/settled.
+Required behavior:
 
-These string errors are a compiler-compatible v1 source surface. The intended language-level endpoint is nominal Error subclasses / Result error types without changing the state machine.
+- live pending writers preserve deterministic registration/admission order;
+- freeing one slot commits at most one pending writer;
+- cancelling an older pending writer removes it;
+- that cancelled payload never appears later;
+- the later live writer can then progress;
+- close settles all uncommitted pending writers without admitting them;
+- waiter retention is bounded and fails closed at its configured limit.
 
-## Fairness and multiple waiters
+Java #2310, Java #2311, LLVM #1198 and .NET #262 contain focused source/runtime regressions for portions of this contract. They remain unexecuted until their exact heads receive real runner steps.
 
-The wrapper intentionally does not promise a second, library-defined fairness algorithm. Pending write ordering inherits `Channel<T>` arbitration. Required conformance:
+## First-class runtime endpoint
 
-- no cancelled waiter may later deliver;
-- freeing one slot admits at most one pending writer;
-- admitted payload FIFO must not be violated;
-- a cancelled older writer must not prevent a later live writer from progressing;
-- close must settle all pending pushes without admitting them after closure;
-- pending-registration limits must fail closed rather than grow without bound.
+The final local multi-producer primitive should be a compiler/runtime-known `BoundedQueue<T>` capability, similar to `Channel<T>`, not an ordinary class wrapping a channel.
 
-Java currently has runtime machinery for pending registration quotas and cancellation-safe pending writer removal. Explicit queue-level regression tests are still required before promoting this contract.
+Java #2311 currently defines the reference runtime with:
+
+- one-shot generation-bound tickets;
+- finite waiter budget;
+- immediate Full without retained registrations;
+- channel-native pending writes;
+- ticket-only cancellation authority;
+- actual-channel close;
+- deterministic drain;
+- wrong-queue ticket rejection;
+- stale generation rejection.
+
+A follow-on source-lowering stack will expose typed Symbol outcomes and a `QueuePop<T>` view while keeping `BoundedQueue<T>` and `QueueTicket` local to the execution domain.
 
 ## Ownership and allocation
 
-`BoundedQueue<T>` and `QueueTicket` are local capabilities. Do not send them through actor mailboxes.
+Neither queue handles nor tickets may cross actor mailboxes. Actor-to-actor transport remains ActorRef/mailbox based.
 
-Steady-state target:
+Targets:
 
-- LLVM: no mandatory heap allocation per already-provisioned enqueue/dequeue;
-- Java/GraalVM: reuse bounded channel/waiter storage where possible and measure managed allocations;
-- WASM/.NET/Forge: preserve the same observable state machine and bounded waiter policy.
+- LLVM: no mandatory general-heap allocation per already-provisioned steady-state enqueue/dequeue; preallocate queue/waiter metadata where possible.
+- Java/GraalVM: reuse bounded storage/waiter structures and measure managed allocations.
+- .NET/WASM/Forge: preserve the same bounded admission/cancellation/close state machine.
 
-The v1 source object currently allocates one ticket object and small marker channels per ticket. That is acceptable for semantic validation but **not** the final zero-allocation runtime representation. Native backends should lower tickets to compact generation/slot records or equivalent preallocated waiter storage.
+The current source reference allocates ticket objects/marker channels and is not an allocation target.
 
 ## Promotion gates
 
-1. Exact pinned Java compiler `--check` for `src/bounded_queue.ores`.
-2. Execute `tests/bounded_queue_ticket.ores` against its exact output oracle.
-3. Java runtime regression for two pending writers, cancellation of the older writer, and progress of the later writer.
-4. Close-vs-cancel-vs-admit race tests.
-5. Pending waiter quota tests.
-6. Same semantic vectors on Java, LLVM, .NET, WASM, and Forge.
-7. Allocation and reclamation measurements.
+1. Exact pinned Java compiler checks the source reference and fixture.
+2. Exact Java #2311 runtime tests execute with real JDK/Maven steps.
+3. Source-visible first-class queue lowering executes with two independently scheduled local producers.
+4. Close-vs-cancel-vs-admit adversarial tests execute.
+5. Pending waiter quota tests execute.
+6. Same backend-neutral vectors execute independently on Java, LLVM, .NET, WASM and Forge.
+7. Allocation/reclamation measurements land.
 
 Zero-step Actions jobs are `NOT_EXECUTED`, never source failures or passes.
