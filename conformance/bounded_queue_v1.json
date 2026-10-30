@@ -1,96 +1,83 @@
 {
   "schema": "oreslang.bounded_queue.v1",
   "semantics": {
-    "transport": "canonical bounded Channel<T> waiter/admission coordinator",
+    "transport": "compiler/runtime-owned BoundedQueue<T> using canonical bounded channel waiter/admission coordinator",
     "ticket": "one-shot generation-bound local cancellation capability",
     "push_linearization": [
       "ticket cancellation may win only before write commit",
-      "channel close terminally settles an uncommitted write",
-      "write commit permanently admits the value"
+      "actual item-channel close terminally settles an uncommitted write",
+      "write commit permanently admits the payload"
     ],
-    "receive": "committed FIFO values drain before closed+empty terminal state",
+    "ownership": "only admitted consumes payload permanently; every non-admitted terminal outcome returns the exact original payload through QueuePush<T>.take_value()",
+    "receive": "committed FIFO values drain before #closed_drained",
     "close": "idempotent actual-channel close; no consumable synthetic close token",
-    "fairness": "inherits canonical channel registration order; no second waiter queue",
-    "reference_wrapper": "source-readable contract only; final multi-producer handle must be runtime/compiler-known"
+    "fairness": "inherits canonical channel registration order; no second waiter queue"
   },
   "scenarios": [
     {
-      "id": "full_is_non_retaining",
-      "capacity": 2,
+      "id": "full_returns_payload",
+      "capacity": 1,
       "actions": [
-        "ticket:t1",
-        "try_push:1:t1",
-        "ticket:t2",
-        "try_push:2:t2",
-        "ticket:t3",
-        "try_push:3:t3"
+        "push:owned-0:t0",
+        "try_push:owned-1:t1"
       ],
       "outcomes": [
-        "ticket:1",
-        "ok",
-        "ticket:2",
-        "ok",
-        "ticket:3",
-        "full"
+        "#admitted",
+        "#full:return-exact-owned-1"
       ]
     },
     {
-      "id": "cancel_before_ready_write",
-      "capacity": 2,
+      "id": "cancel_before_ready_write_returns_payload",
+      "capacity": 1,
       "actions": [
-        "ticket:t1",
-        "cancel:t1",
-        "push_blocking:7:t1"
+        "push:owned-0:t0",
+        "pending_push:owned-1:t1",
+        "cancel:t1"
       ],
       "outcomes": [
-        "ticket:1",
+        "#admitted",
+        "pending",
         "true",
-        "cancelled"
+        "#cancelled:return-exact-owned-1"
       ]
     },
     {
       "id": "ticket_is_one_shot",
       "capacity": 2,
       "actions": [
-        "ticket:t1",
         "try_push:1:t1",
-        "try_push:2:t1",
-        "cancel:t1"
+        "try_push:2:t1"
       ],
       "outcomes": [
-        "ticket:1",
-        "ok",
-        "ticket-used",
-        "false"
+        "#admitted",
+        "#ticket_used:return-exact-2"
       ]
     },
     {
       "id": "close_invalidates_unclaimed_ticket_and_drains",
       "capacity": 2,
       "actions": [
-        "ticket:t1",
         "try_push:1:t1",
         "ticket:stale",
         "close",
         "try_push:2:stale",
-        "pop_blocking",
-        "pop_blocking"
+        "pop",
+        "pop"
       ],
       "outcomes": [
-        "ticket:1",
-        "ok",
-        "ticket:2",
+        "#admitted",
+        "ticket:stale",
         "true",
-        "stale-ticket",
-        "some:1",
-        "none"
+        "#stale_ticket:return-exact-2",
+        "value:1",
+        "#closed_drained"
       ]
     },
     {
       "id": "live_pending_writers_fifo",
       "capacity": 1,
       "actions": [
-        "fill:0",
+        "push:0:t0",
         "pending_push:1:t1",
         "pending_push:2:t2",
         "pop",
@@ -100,13 +87,13 @@
         "pop"
       ],
       "outcomes": [
-        "ok",
+        "#admitted",
         "pending",
         "pending",
         "value:0",
-        "ok",
+        "#admitted",
         "value:1",
-        "ok",
+        "#admitted",
         "value:2"
       ],
       "required_runtime_test": true
@@ -115,10 +102,8 @@
       "id": "older_cancelled_waiter_does_not_block_later_waiter",
       "capacity": 1,
       "actions": [
-        "fill:0",
-        "ticket:t1",
+        "push:0:t0",
         "pending_push:1:t1",
-        "ticket:t2",
         "pending_push:2:t2",
         "cancel:t1",
         "pop",
@@ -127,24 +112,22 @@
         "pop"
       ],
       "outcomes": [
-        "ok",
-        "ticket:1",
+        "#admitted",
         "pending",
-        "ticket:2",
         "pending",
         "true",
         "value:0",
-        "cancelled",
-        "ok",
+        "#cancelled:return-exact-1",
+        "#admitted",
         "value:2"
       ],
       "required_runtime_test": true
     },
     {
-      "id": "close_settles_pending_and_drains_committed",
+      "id": "close_settles_pending_and_returns_payload",
       "capacity": 1,
       "actions": [
-        "fill:0",
+        "push:0:t0",
         "pending_push:1:t1",
         "close",
         "await:t1",
@@ -152,12 +135,27 @@
         "pop"
       ],
       "outcomes": [
-        "ok",
+        "#admitted",
         "pending",
         "true",
-        "closed",
+        "#closed:return-exact-1",
         "value:0",
-        "none"
+        "#closed_drained"
+      ],
+      "required_runtime_test": true
+    },
+    {
+      "id": "waiter_budget_returns_payload",
+      "capacity": 1,
+      "actions": [
+        "push:0:t0",
+        "pending_push:1:t1",
+        "pending_push:2:t2@budget-exhausted"
+      ],
+      "outcomes": [
+        "#admitted",
+        "pending",
+        "#resource_limit:return-exact-2"
       ],
       "required_runtime_test": true
     }
@@ -169,5 +167,5 @@
     "wasm",
     "forge"
   ],
-  "evidence_rule": "Each backend executes independently; source lowering, runtime substrate, and guest execution are separate gates; zero-step CI is NOT_EXECUTED."
+  "evidence_rule": "Each backend executes independently; runtime substrate, source lowering, ownership recovery, and guest execution are separate gates; zero-step CI is NOT_EXECUTED."
 }
