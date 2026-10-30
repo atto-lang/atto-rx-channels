@@ -45,6 +45,7 @@ def run(args):
 TESTS = validate_cases(ROOT / 'tests', ('.out', '.err', '.check.err'))
 assert_pointerless()
 run(['--check', str(ROOT / 'src/rx.ores')])
+run(['--check', str(ROOT / 'src/bounded_queue.ores')])
 for example in sorted((ROOT / 'examples').glob('*.ores')):
     run(['--check', str(example)])
 failures = []
