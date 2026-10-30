@@ -1,7 +1,5 @@
-import * as bounded from '../src/bounded_queue.ores';
-
 pub async fnc main(): void {
-  val BoundedQueue<int> queue = bounded.bounded_queue<int>(2, 4);
+  val BoundedQueue<int> queue = BoundedQueue.new<int>(2, 4);
 
   val QueuePush<int> first =
       queue.try_push(11, queue.new_ticket());
