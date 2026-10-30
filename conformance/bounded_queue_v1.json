@@ -1,0 +1,127 @@
+{
+  "schema": "oreslang.bounded_queue.v1",
+  "semantics": {
+    "transport": "Channel<T>",
+    "ticket": "one-shot cancellation capability",
+    "push_priority": [
+      "cancelled",
+      "closed",
+      "write"
+    ],
+    "receive_priority": [
+      "item",
+      "closed"
+    ],
+    "close": "idempotent drain-before-terminal",
+    "fairness": "inherits channel coordinator; no second waiter queue"
+  },
+  "scenarios": [
+    {
+      "id": "full_is_non_retaining",
+      "capacity": 2,
+      "actions": [
+        "ticket:t1",
+        "try_push:1:t1",
+        "ticket:t2",
+        "try_push:2:t2",
+        "ticket:t3",
+        "try_push:3:t3"
+      ],
+      "outcomes": [
+        "ticket:1",
+        "ok",
+        "ticket:2",
+        "ok",
+        "ticket:3",
+        "full"
+      ]
+    },
+    {
+      "id": "cancel_before_ready_write",
+      "capacity": 2,
+      "actions": [
+        "ticket:t1",
+        "cancel:t1",
+        "push_blocking:7:t1"
+      ],
+      "outcomes": [
+        "ticket:1",
+        "true",
+        "cancelled"
+      ]
+    },
+    {
+      "id": "ticket_is_one_shot",
+      "capacity": 2,
+      "actions": [
+        "ticket:t1",
+        "try_push:1:t1",
+        "try_push:2:t1",
+        "cancel:t1"
+      ],
+      "outcomes": [
+        "ticket:1",
+        "ok",
+        "ticket-used",
+        "false"
+      ]
+    },
+    {
+      "id": "close_invalidates_unclaimed_ticket_and_drains",
+      "capacity": 2,
+      "actions": [
+        "ticket:t1",
+        "try_push:1:t1",
+        "ticket:stale",
+        "close",
+        "try_push:2:stale",
+        "pop_blocking",
+        "pop_blocking"
+      ],
+      "outcomes": [
+        "ticket:1",
+        "ok",
+        "ticket:2",
+        "true",
+        "stale-ticket",
+        "some:1",
+        "none"
+      ]
+    },
+    {
+      "id": "older_cancelled_waiter_does_not_block_later_waiter",
+      "capacity": 1,
+      "actions": [
+        "fill:0",
+        "ticket:t1",
+        "pending_push:1:t1",
+        "ticket:t2",
+        "pending_push:2:t2",
+        "cancel:t1",
+        "pop",
+        "await:t2",
+        "pop"
+      ],
+      "outcomes": [
+        "ok",
+        "ticket:1",
+        "pending",
+        "ticket:2",
+        "pending",
+        "true",
+        "value:0",
+        "ok",
+        "value:2"
+      ],
+      "required_runtime_test": true
+    }
+  ],
+  "backends": [
+    "java",
+    "llvm",
+    "net",
+    "wasm",
+    "forge"
+  ],
+  "evidence_rule": "Each backend executes independently; zero-step CI is NOT_EXECUTED."
+}
