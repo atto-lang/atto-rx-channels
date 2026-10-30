@@ -1,19 +1,17 @@
 {
   "schema": "oreslang.bounded_queue.v1",
   "semantics": {
-    "transport": "Channel<T>",
-    "ticket": "one-shot cancellation capability",
-    "push_priority": [
-      "cancelled",
-      "closed",
-      "write"
+    "transport": "canonical bounded Channel<T> waiter/admission coordinator",
+    "ticket": "one-shot generation-bound local cancellation capability",
+    "push_linearization": [
+      "ticket cancellation may win only before write commit",
+      "channel close terminally settles an uncommitted write",
+      "write commit permanently admits the value"
     ],
-    "receive_priority": [
-      "item",
-      "closed"
-    ],
-    "close": "idempotent drain-before-terminal",
-    "fairness": "inherits channel coordinator; no second waiter queue"
+    "receive": "committed FIFO values drain before closed+empty terminal state",
+    "close": "idempotent actual-channel close; no consumable synthetic close token",
+    "fairness": "inherits canonical channel registration order; no second waiter queue",
+    "reference_wrapper": "source-readable contract only; final multi-producer handle must be runtime/compiler-known"
   },
   "scenarios": [
     {
@@ -89,6 +87,31 @@
       ]
     },
     {
+      "id": "live_pending_writers_fifo",
+      "capacity": 1,
+      "actions": [
+        "fill:0",
+        "pending_push:1:t1",
+        "pending_push:2:t2",
+        "pop",
+        "await:t1",
+        "pop",
+        "await:t2",
+        "pop"
+      ],
+      "outcomes": [
+        "ok",
+        "pending",
+        "pending",
+        "value:0",
+        "ok",
+        "value:1",
+        "ok",
+        "value:2"
+      ],
+      "required_runtime_test": true
+    },
+    {
       "id": "older_cancelled_waiter_does_not_block_later_waiter",
       "capacity": 1,
       "actions": [
@@ -99,6 +122,7 @@
         "pending_push:2:t2",
         "cancel:t1",
         "pop",
+        "await:t1",
         "await:t2",
         "pop"
       ],
@@ -110,8 +134,30 @@
         "pending",
         "true",
         "value:0",
+        "cancelled",
         "ok",
         "value:2"
+      ],
+      "required_runtime_test": true
+    },
+    {
+      "id": "close_settles_pending_and_drains_committed",
+      "capacity": 1,
+      "actions": [
+        "fill:0",
+        "pending_push:1:t1",
+        "close",
+        "await:t1",
+        "pop",
+        "pop"
+      ],
+      "outcomes": [
+        "ok",
+        "pending",
+        "true",
+        "closed",
+        "value:0",
+        "none"
       ],
       "required_runtime_test": true
     }
@@ -123,5 +169,5 @@
     "wasm",
     "forge"
   ],
-  "evidence_rule": "Each backend executes independently; zero-step CI is NOT_EXECUTED."
+  "evidence_rule": "Each backend executes independently; source lowering, runtime substrate, and guest execution are separate gates; zero-step CI is NOT_EXECUTED."
 }
