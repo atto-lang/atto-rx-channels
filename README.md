@@ -14,7 +14,7 @@ source .work/env.sh
 python3 scripts/test.py
 ```
 
-`compiler.lock` on this branch pins exact Java head `6e9ba91b5891243e24a50a85985cd0828fe642e5` (draft Java PR #2310). That head is current Java main plus test-only contracts for pending-writer FIFO/cancellation/close behavior and the exact generic ticketed queue source surface used here. Production channel semantics are unchanged by #2310. This pin is intentionally **draft-only** until that exact Java head and this exact Rx head execute with real runner steps. Setup fetches the pinned commit; it does not modify the compiler checkout or `std/rx`.
+`compiler.lock` on this branch pins exact Java source-contract head `d5aac011ca6dfc6b00cc05e0b01e08a6b59be59f` (draft Java PR #2310). #2310 pins pending-writer FIFO/cancellation/close behavior plus the source constructs used by the readable queue reference. The first-class Java runtime capability is stacked separately in draft #2311. This pin is intentionally **draft-only** until the exact Java/Rx heads execute with real runner steps. Setup fetches the pinned commit; it does not modify the compiler checkout or `std/rx`.
 
 You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/classes` plus its Maven dependency classpath. Set `JAVA` to the Java executable if necessary.
 
@@ -179,8 +179,10 @@ This repository tracks compiler PRs #398/#399/#404/#405/#406/#408/#409/#410/#411
 
 ## Ticketed bounded queue
 
-`src/bounded_queue.ores` adds a typed `BoundedQueue<T>` policy over `Channel<T>`; it does not add a second scheduler or mailbox. Each push attempt uses a one-shot `QueueTicket`. The blocking path atomically prioritizes ticket cancellation, then queue close, then write admission. Close invalidates pre-close unclaimed tickets, preserves already-admitted FIFO values for draining, and becomes terminal only after the queue is empty.
+`src/bounded_queue.ores` is the readable source-reference state machine for the typed bounded-queue contract. It uses the existing `Channel<T>` coordinator and never creates a second waiter list. Queue close now closes the **actual item channel**; there is no synthetic close token that a waiter could consume and temporarily hide from another waiter.
 
-The exact guest fixture is `tests/bounded_queue_ticket.ores`; backend-neutral vectors are in `conformance/bounded_queue_v1.json`. See `docs/bounded_queue_v1.md` for the state machine, multiple-waiter requirements, and allocation targets.
+The source wrapper is deliberately **not claimed as the final multi-producer handle**. Ordinary user classes containing Channel capabilities are move-only, so independently scheduled local producers cannot safely share that wrapper as though it were a compiler-owned Channel handle. Draft Java #2311 supplies the first-class runtime reference: a copyable execution-domain-local queue capability, one-shot generation tickets, finite waiter budgets, channel-native pending writes, cancellation/no-ghost semantics, and drain-preserving close.
 
-This is currently **draft source evidence**. Do not claim compiler execution, multiple-waiter fairness, five-backend parity, or zero-allocation lowering until the listed gates execute on real runners.
+The exact source fixture is `tests/bounded_queue_ticket.ores`; backend-neutral vectors are in `conformance/bounded_queue_v1.json`. See `docs/bounded_queue_v1.md` for the layer boundary, linearization rules, multiple-waiter requirements, and allocation targets.
+
+This remains **draft evidence**. Do not claim compiler execution, Java runtime execution, five-backend parity, or zero-allocation lowering until exact heads run with real runner steps.
