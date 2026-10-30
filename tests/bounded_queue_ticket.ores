@@ -1,63 +1,52 @@
 import * as bounded from '../src/bounded_queue.ores';
-import class BoundedQueue, QueueTicket from '../src/bounded_queue.ores';
-
-fnc print_error(Result<bool, String> outcome): void {
-  match outcome
-    Ok(value) -> {
-      stdio.println("unexpected-ok");
-    }
-    Err(error) -> {
-      stdio.println(error);
-    }
-  end
-  return;
-}
 
 pub async fnc main(): void {
-  val Option<int> element_type = None;
-  val BoundedQueue<int> queue = bounded.bounded_queue(2, element_type);
+  val BoundedQueue<int> queue = bounded.bounded_queue<int>(2, 4);
 
-  val QueueTicket first_ticket = queue.new_ticket().expect("first ticket");
-  val QueueTicket second_ticket = queue.new_ticket().expect("second ticket");
+  val QueuePush<int> first =
+      queue.try_push(11, queue.new_ticket());
+  stdio.println(first.status);
 
-  stdio.println(queue.try_push(11, first_ticket).expect("push 11"));
-  stdio.println(queue.push_blocking(22, second_ticket).expect("push 22"));
+  val QueuePush<int> second =
+      queue.try_push(22, queue.new_ticket());
+  stdio.println(second.status);
 
-  val QueueTicket full_ticket = queue.new_ticket().expect("full ticket");
-  print_error(queue.try_push(33, full_ticket));
+  val QueuePush<int> full =
+      queue.try_push(33, queue.new_ticket());
+  stdio.println(full.status);
+  stdio.println(full.take_value().unwrap());
 
-  val Option<int> first = queue.try_pop().expect("first pop");
-  stdio.println(first.unwrap());
+  val QueuePop<int> first_pop = queue.try_pop();
+  stdio.println(first_pop.take_value().unwrap());
 
-  val QueueTicket cancelled_ticket =
-      queue.new_ticket().expect("cancelled ticket");
+  val QueueTicket cancelled_ticket = queue.new_ticket();
   stdio.println(cancelled_ticket.cancel());
-  print_error(queue.push_blocking(33, cancelled_ticket));
+  val QueuePush<int> cancelled =
+      queue.try_push(33, cancelled_ticket);
+  stdio.println(cancelled.status);
+  stdio.println(cancelled.take_value().unwrap());
 
-  val QueueTicket third_ticket = queue.new_ticket().expect("third ticket");
-  stdio.println(queue.push_blocking(33, third_ticket).expect("push 33"));
-  print_error(queue.try_push(44, third_ticket));
+  val QueueTicket third_ticket = queue.new_ticket();
+  val QueuePush<int> third = queue.try_push(33, third_ticket);
+  stdio.println(third.status);
+
+  val QueuePush<int> reused = queue.try_push(44, third_ticket);
+  stdio.println(reused.status);
+  stdio.println(reused.take_value().unwrap());
   stdio.println(third_ticket.cancel());
 
-  stdio.println(queue.try_pop().expect("second pop").unwrap());
-  stdio.println(queue.try_pop().expect("third pop").unwrap());
+  stdio.println(queue.try_pop().take_value().unwrap());
+  stdio.println(queue.try_pop().take_value().unwrap());
 
-  val QueueTicket stale_ticket = queue.new_ticket().expect("stale ticket");
+  val QueueTicket stale_ticket = queue.new_ticket();
   stdio.println(queue.close());
   stdio.println(queue.close());
-  print_error(queue.try_push(44, stale_ticket));
 
-  val Option<int> drained = queue.pop_blocking();
-  stdio.println(drained.is_none());
+  val QueuePush<int> stale = queue.try_push(44, stale_ticket);
+  stdio.println(stale.status);
+  stdio.println(stale.take_value().unwrap());
 
-  val Result<QueueTicket, String> after_close = queue.new_ticket();
-  match after_close
-    Ok(ticket) -> {
-      stdio.println("unexpected-ticket");
-    }
-    Err(error) -> {
-      stdio.println(error);
-    }
-  end
+  val QueuePop<int> drained = queue.try_pop();
+  stdio.println(drained.status);
   return;
 }
