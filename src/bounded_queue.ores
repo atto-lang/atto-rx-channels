@@ -1,0 +1,292 @@
+// Typed bounded queue policy built on Oreslang Channel<T>.
+//
+// This file does not introduce a second scheduler or mailbox transport.
+// Channel<T> remains the buffering, rendezvous and waiter-arbitration primitive.
+// BoundedQueue<T> adds:
+//   - one-shot cancellation tickets per push attempt
+//   - cancellation-before-admission ordering
+//   - deterministic close/drain semantics
+//   - generation invalidation for pre-close tickets
+//
+// QueueTicket and BoundedQueue are execution-domain-local capabilities. They
+// must not cross actor/message boundaries while Channel<T> remains local-only.
+
+fnc queue_marker_set(Channel<bool> marker): bool {
+  val Option<bool> present = try readch marker;
+  if present.is_some(); then
+    try writech marker, true;
+    return true;
+  fi
+  return false;
+}
+
+define class QueueTicket as
+  val int queue_generation;
+  val int sequence;
+  val Channel<bool> cancelled = Channel.new<bool>(1);
+  val Channel<bool> claimed = Channel.new<bool>(1);
+  val Channel<bool> settled = Channel.new<bool>(1);
+
+  constructor(int queue_generation, int sequence) {
+    self.queue_generation = queue_generation;
+    self.sequence = sequence;
+  }
+
+  pub generation(): int {
+    return self.queue_generation;
+  }
+
+  pub id(): int {
+    return self.sequence;
+  }
+
+  // Cancellation is idempotent and cannot revoke an already-settled attempt.
+  pub cancel(): bool {
+    if queue_marker_set(self.settled); then
+      return false;
+    fi
+    return try writech self.cancelled, true;
+  }
+
+  pub is_cancelled(): bool {
+    return queue_marker_set(self.cancelled);
+  }
+
+  // Internal protocol surface used by BoundedQueue<T>. A ticket is one-shot.
+  pub claim_once(): bool {
+    if queue_marker_set(self.settled); then
+      return false;
+    fi
+    return try writech self.claimed, true;
+  }
+
+  // Static select needs the raw local cancellation capability. This channel is
+  // intentionally execution-domain-local and is not message-sendable.
+  pub cancellation_signal(): Channel<bool> {
+    return self.cancelled;
+  }
+
+  // Preserve cancellation as a sticky state after a select consumes the token.
+  pub restore_cancelled(): void {
+    try writech self.cancelled, true;
+    return;
+  }
+
+  pub settle_once(): bool {
+    return try writech self.settled, true;
+  }
+
+  pub is_settled(): bool {
+    return queue_marker_set(self.settled);
+  }
+end
+
+define class BoundedQueue<T> as
+  val Channel<T> items;
+  val Channel<bool> closed = Channel.new<bool>(1);
+  val Channel<bool> state_gate = Channel.new<bool>(1);
+  val int capacity;
+  let int generation;
+  let int next_ticket;
+
+  constructor(int capacity) {
+    if capacity < 1; then
+      val Result<bool, String> invalid =
+          Err("bounded queue capacity must be positive");
+      invalid.expect("rx_channels.BoundedQueue");
+    fi
+    self.items = Channel.new<T>(capacity);
+    self.capacity = capacity;
+    self.generation = 1;
+    self.next_ticket = 1;
+    writech self.state_gate, true;
+  }
+
+  pub get_capacity(): int {
+    return self.capacity;
+  }
+
+  pub get_generation(): int {
+    val bool permit = readch self.state_gate;
+    try {
+      return self.generation;
+    } finally {
+      writech self.state_gate, permit;
+    }
+  }
+
+  pub is_closed(): bool {
+    val bool permit = readch self.state_gate;
+    try {
+      return queue_marker_set(self.closed);
+    } finally {
+      writech self.state_gate, permit;
+    }
+  }
+
+  // Issue exactly one push-attempt ticket. Closing the queue increments the
+  // generation so any not-yet-claimed pre-close ticket becomes stale.
+  pub new_ticket(): Result<QueueTicket, String> {
+    val bool permit = readch self.state_gate;
+    try {
+      if queue_marker_set(self.closed); then
+        return Err("closed");
+      fi
+      val int sequence = self.next_ticket;
+      self.next_ticket = self.next_ticket + 1;
+      return Ok(new QueueTicket(self.generation, sequence));
+    } finally {
+      writech self.state_gate, permit;
+    }
+  }
+
+  // Immediate admission. Full never leaves a pending waiter.
+  // A ticket belongs to one push attempt even when that attempt returns Full.
+  pub try_push(T value, QueueTicket ticket): Result<bool, String> {
+    val bool permit = readch self.state_gate;
+    try {
+      if ticket.generation() != self.generation; then
+        ticket.settle_once();
+        return Err("stale-ticket");
+      fi
+      if queue_marker_set(self.closed); then
+        ticket.settle_once();
+        return Err("closed");
+      fi
+      if !ticket.claim_once(); then
+        return Err("ticket-used");
+      fi
+      if ticket.is_cancelled(); then
+        ticket.settle_once();
+        return Err("cancelled");
+      fi
+      val bool admitted = try writech self.items, value;
+      ticket.settle_once();
+      if admitted; then
+        return Ok(true);
+      fi
+      return Err("full");
+    } finally {
+      writech self.state_gate, permit;
+    }
+  }
+
+  // Suspending admission. "_blocking" follows Oreslang I/O naming: the source
+  // continuation may suspend, but no actor carrier thread is parked.
+  //
+  // Priority is deliberate:
+  //   1. a cancellation already visible when arbitration occurs wins;
+  //   2. close wins over a not-yet-committed write;
+  //   3. otherwise the write commits when Channel<T> admits it.
+  //
+  // Multiple callers may register independently. The underlying channel owns
+  // waiter retention, cancellation-safe loser removal and admission ordering.
+  pub push_blocking(T value, QueueTicket ticket): Result<bool, String> {
+    val bool permit = readch self.state_gate;
+    try {
+      if ticket.generation() != self.generation; then
+        ticket.settle_once();
+        return Err("stale-ticket");
+      fi
+      if queue_marker_set(self.closed); then
+        ticket.settle_once();
+        return Err("closed");
+      fi
+      if !ticket.claim_once(); then
+        return Err("ticket-used");
+      fi
+    } finally {
+      writech self.state_gate, permit;
+    }
+
+    val Channel<bool> cancellation = ticket.cancellation_signal();
+
+    do select first {
+      when readch cancellation: const ignored {
+        ticket.restore_cancelled();
+        ticket.settle_once();
+        return Err("cancelled");
+      }
+      when readch self.closed: const ignored {
+        try writech self.closed, true;
+        ticket.settle_once();
+        return Err("closed");
+      }
+      when writech self.items, value: {
+        ticket.settle_once();
+        return Ok(true);
+      }
+    }
+  }
+
+  // Immediate receive:
+  //   Ok(Some(value)) => one FIFO item
+  //   Ok(None)        => closed and fully drained
+  //   Err("empty")    => open but no item ready now
+  pub try_pop(): Result<Option<T>, String> {
+    val Option<T> item = try readch self.items;
+    if item.is_some(); then
+      return Ok(item);
+    fi
+
+    val bool permit = readch self.state_gate;
+    try {
+      if queue_marker_set(self.closed); then
+        return Ok(None);
+      fi
+      return Err("empty");
+    } finally {
+      writech self.state_gate, permit;
+    }
+  }
+
+  // Drain-before-terminal receive. If buffered data and close are both ready,
+  // item delivery wins so close never discards an admitted value.
+  pub pop_blocking(): Option<T> {
+    do select first {
+      when readch self.items: val value {
+        return Some(value);
+      }
+      when readch self.closed: const ignored {
+        try writech self.closed, true;
+        return None;
+      }
+    }
+  }
+
+  // Close is idempotent. It does not discard already-admitted values.
+  // Generation advances before the gate is released, invalidating unclaimed
+  // tickets from the previous open generation.
+  pub close(): bool {
+    val bool permit = readch self.state_gate;
+    try {
+      if queue_marker_set(self.closed); then
+        return false;
+      fi
+      self.generation = self.generation + 1;
+      val bool published = try writech self.closed, true;
+      if !published; then
+        val Result<bool, String> failure =
+            Err("bounded queue close marker publication failed");
+        failure.expect("rx_channels.BoundedQueue.close");
+      fi
+      return true;
+    } finally {
+      writech self.state_gate, permit;
+    }
+  }
+end
+
+// Current generic import inference is strongest when callers supply an
+// explicitly typed None witness, matching framed_pipe<T>.
+pub fnc bounded_queue<T>(
+    int capacity,
+    Option<T> witness
+): BoundedQueue<T> {
+  if witness.is_some(); then
+    val Result<bool, String> invalid =
+        Err("bounded queue witness must be None");
+    invalid.expect("rx_channels.bounded_queue");
+  fi
+  return new BoundedQueue<T>(capacity);
+}
