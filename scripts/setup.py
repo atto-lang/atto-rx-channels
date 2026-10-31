@@ -7,16 +7,24 @@ import shlex
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / '.work' / 'oreslang-source.java'
+WORK = ROOT / '.work'
+SOURCE = WORK / 'oreslang-source.java'
+CLASSPATH_FILE = WORK / 'classpath.txt'
 REVISION = (ROOT / 'compiler.lock').read_text().strip()
 TREE_FILE = ROOT / 'compiler-tree.txt'
 EXPECTED_TREE = TREE_FILE.read_text().strip() if TREE_FILE.exists() else None
 if not re.fullmatch(r'[0-9a-f]{40}', REVISION) or (EXPECTED_TREE is not None and
         not re.fullmatch(r'[0-9a-f]{40}', EXPECTED_TREE)):
     raise SystemExit('compiler revision and tree must be full Git SHAs')
+# Never follow a poisoned .work parent or compiler classpath output. A
+# caller-controlled symlink could redirect clone or Maven output outside root.
+if WORK.is_symlink() or (WORK.exists() and not WORK.is_dir()):
+    raise SystemExit('compiler work directory must be a real directory')
 if SOURCE.is_symlink():
     raise SystemExit('compiler path must not be a symlink')
-SOURCE.parent.mkdir(exist_ok=True)
+if CLASSPATH_FILE.is_symlink() or (CLASSPATH_FILE.exists() and not CLASSPATH_FILE.is_file()):
+    raise SystemExit('compiler classpath must be a regular file')
+WORK.mkdir(exist_ok=True)
 if not SOURCE.exists():
     subprocess.run(['git', 'clone', '--depth', '1',
                     'https://github.com/ores-truffle-oreslang/oreslang-source.java.git',
@@ -50,7 +58,7 @@ if git('status', '--porcelain', '--untracked-files=all'):
 environment = ROOT / '.work' / 'env.sh'
 environment.unlink(missing_ok=True)
 subprocess.run(['mvn', '-q', '-f', str(SOURCE / 'pom.xml'), '-DskipTests', 'clean', 'package'], check=True)
-classpath_file = ROOT / '.work' / 'classpath.txt'
+classpath_file = CLASSPATH_FILE
 subprocess.run(['mvn', '-q', '-f', str(SOURCE / 'pom.xml'), 'dependency:build-classpath',
                 f'-Dmdep.outputFile={classpath_file}'], check=True)
 classpath = str(SOURCE / 'target/classes') + os.pathsep + classpath_file.read_text().strip()
