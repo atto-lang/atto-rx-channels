@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import subprocess
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / '.work'
@@ -61,10 +62,20 @@ subprocess.run(['mvn', '-q', '-f', str(SOURCE / 'pom.xml'), '-DskipTests', 'clea
 classpath_file = CLASSPATH_FILE
 subprocess.run(['mvn', '-q', '-f', str(SOURCE / 'pom.xml'), 'dependency:build-classpath',
                 f'-Dmdep.outputFile={classpath_file}'], check=True)
+# Check again after an external builder: do not publish a poisoned classpath
+# output as the trusted compiler environment. A concurrently writable workdir
+# still needs filesystem ownership / sandboxing to rule out TOCTOU mutation.
+if classpath_file.is_symlink() or not classpath_file.is_file():
+    raise SystemExit('compiler classpath must be a regular file after build')
 classpath = str(SOURCE / 'target/classes') + os.pathsep + classpath_file.read_text().strip()
-temporary = environment.with_name('env.sh.' + str(os.getpid()) + '.tmp')
+# PID-based temporary filenames can be pre-created as symlinks. mkstemp-backed
+# files use O_EXCL + random suffix and are not opened by following an old path.
+with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                                 dir=WORK, prefix='env.sh.', suffix='.tmp',
+                                 delete=False) as output:
+    temporary = Path(output.name)
+    output.write('export ORES_CLASSPATH=' + shlex.quote(classpath) + '\n')
 try:
-    temporary.write_text('export ORES_CLASSPATH=' + shlex.quote(classpath) + '\n')
     temporary.replace(environment)
 finally:
     temporary.unlink(missing_ok=True)
