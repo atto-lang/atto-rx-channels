@@ -93,4 +93,32 @@ class CompilerSetupTests(unittest.TestCase):
         self.assertIn('must not be a symlink', result.stderr)
         self.assertFalse(self.log.exists())
 
+
+    def test_symlinked_work_root_refused_before_clone_or_build(self):
+        work = self.root / '.work'
+        actual = self.root / 'moved-work'
+        work.rename(actual)
+        work.symlink_to(actual, target_is_directory=True)
+        result = self.run_setup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('work directory must be a real directory', result.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_symlinked_classpath_refused_before_build(self):
+        outside = self.root / 'outside.txt'
+        outside.write_text('must remain unchanged')
+        (self.root / '.work/classpath.txt').symlink_to(outside)
+        result = self.run_setup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('classpath must be a regular file', result.stderr)
+        self.assertEqual(outside.read_text(), 'must remain unchanged')
+        self.assertFalse(self.log.exists())
+
+    def test_classpath_directory_masquerade_refused_before_build(self):
+        (self.root / '.work/classpath.txt').mkdir()
+        result = self.run_setup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('classpath must be a regular file', result.stderr)
+        self.assertFalse(self.log.exists())
+
 if __name__ == '__main__': unittest.main()
