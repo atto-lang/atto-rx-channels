@@ -121,10 +121,19 @@ define class Observable<T> as
   }
 end
 
+// A raw channel is hot/unicast. Never hand out competing subscriptions:
+// only one consumer can receive its single terminal frame.
 define class ChannelObservable<T> extends Observable<T> as
   val Channel<Option<T>> input;
+  val Channel<bool> subscribed = Channel.new<bool>(1);
   constructor(Channel<Option<T>> input) { self.input = input; }
-  pub subscribe(): Subscription<T> { return new ChannelSubscription<T>(self.input); }
+  pub subscribe(): Subscription<T> {
+    if !(try writech self.subscribed, true); then
+      val Result<bool, String> failure = Err("only one subscriber is allowed");
+      failure.expect("rx_channels.ChannelObservable.subscribe");
+    fi
+    return new ChannelSubscription<T>(self.input);
+  }
 end
 
 define class ValuesObservable<T> extends Observable<T> as
@@ -474,11 +483,16 @@ end
 define class MergeObservable<T> extends Observable<T> as
   val Channel<Option<T>> left;
   val Channel<Option<T>> right;
+  val Channel<bool> subscribed = Channel.new<bool>(1);
   constructor(Channel<Option<T>> left, Channel<Option<T>> right) {
     self.left = left;
     self.right = right;
   }
   pub subscribe(): Subscription<T> {
+    if !(try writech self.subscribed, true); then
+      val Result<bool, String> failure = Err("only one subscriber is allowed");
+      failure.expect("rx_channels.MergeObservable.subscribe");
+    fi
     return new MergeSubscription<T>(self.left, self.right);
   }
 end
