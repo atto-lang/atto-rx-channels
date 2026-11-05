@@ -1,4 +1,4 @@
-"""Admit a nonempty fixture set with one explicit expectation per program."""
+"""Admit a nonempty fixture set with one explicit regular-file expectation per program."""
 from pathlib import Path
 
 
@@ -8,11 +8,16 @@ def validate_cases(directory, suffixes):
     if not cases:
         raise RuntimeError(f'test inventory must not be empty: {directory}')
     for case in cases:
-        if not case.is_file():
-            raise RuntimeError(f'test case must be a file: {case}')
-        expected = [case.with_suffix(suffix) for suffix in suffixes if case.with_suffix(suffix).is_file()]
+        # Symlink aliases can substitute a different guest source after inventory
+        # admission. Do not follow aliases at this source-owned trust boundary.
+        if case.is_symlink() or not case.is_file():
+            raise RuntimeError(f'test case must be a regular file: {case}')
+        candidates = [case.with_suffix(suffix) for suffix in suffixes]
+        expected = [path for path in candidates if path.exists() or path.is_symlink()]
         if len(expected) != 1:
             raise RuntimeError(f'exactly one expected result is required: {case}')
+        if expected[0].is_symlink() or not expected[0].is_file():
+            raise RuntimeError(f'expected result must be a regular file: {expected[0]}')
         if expected[0].suffix == '.err' and not expected[0].read_text().strip():
             raise RuntimeError(f'negative expectation must not be empty: {expected[0]}')
     admitted = {case.name for case in cases}
@@ -22,6 +27,8 @@ def validate_cases(directory, suffixes):
             if expected in seen:
                 continue
             seen.add(expected)
+            if expected.is_symlink() or not expected.is_file():
+                raise RuntimeError(f'expected result must be a regular file: {expected}')
             if expected.name[:-len(suffix)] + '.ores' not in admitted:
                 raise RuntimeError(f'orphan expected result: {expected}')
     return cases
