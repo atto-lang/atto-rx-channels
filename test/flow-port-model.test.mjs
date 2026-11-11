@@ -125,4 +125,9 @@ test('constructor and value validation fail closed', () => {
   assert.equal(p.offer(v).ok,true);
   assert.throws(()=>{v.owner='producer'},/getter/);
   assert.throws(()=>p.offer(v),/producer-owned/);
+  assert.throws(()=>v.admit(),/unauthorized/);
+  assert.throws(()=>v.deliver(),/unauthorized/);
+  assert.throws(()=>v.drop(),/unauthorized/);
+  assert.throws(()=>{v.bytes=999},/read only/);
+  assert.equal(v.bytes,1);
 });
