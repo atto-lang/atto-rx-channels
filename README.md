@@ -25,3 +25,11 @@ This describes intended scope, not a verified feature matrix. Consult the source
 - [AttoLang](https://github.com/atto-lang)
 - [Language specification](https://github.com/atto-lang/atto-spec)
 - [Cross-platform conformance](https://github.com/atto-lang/atto-platform-conformance)
+
+## Pull/push bounded-flow reference model (TARGET, not guest support)
+
+See [the pull/push reactive-admission contract](docs/PULL_PUSH_CONTRACT_V1.md) and its
+[source-free protocol model](src/flow-port-model.mjs). Run the model assertions with
+`node --test test/flow-port-model.test.mjs` (Node 20+). These tests **do not**
+certify compiled AttoLang, any runtime backend, cross-backend parity, or a
+zero-GC allocation profile. All concrete guest APIs remain unverified.
