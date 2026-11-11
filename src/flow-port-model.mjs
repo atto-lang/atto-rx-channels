@@ -1,5 +1,6 @@
 // Reference protocol model only; not an AttoLang runtime, borrow checker or guest ABI.
 // Zero- or positive-capacity, single-consumer, demand-aware, ownership-ticketed port.
+const PORT_AUTHORITY = Symbol('reference-model-port-authority');
 const positive = (value, name) => {
   if (!Number.isSafeInteger(value) || value < 1) throw new RangeError(`${name} must be a positive safe integer`);
   return value;
@@ -14,19 +15,22 @@ export class OwnedValue {
   #drops = 0;
   constructor(data, bytes) {
     this.data = data;
-    this.bytes = positive(bytes, 'bytes');
+    Object.defineProperty(this, 'bytes', {value:positive(bytes, 'bytes'), enumerable:true, writable:false});
   }
   get owner() { return this.#owner; }
   get drops() { return this.#drops; }
-  admit() {
+  admit(authority) {
+    if (authority !== PORT_AUTHORITY) throw new Error('unauthorized ownership transition');
     if (this.#owner !== 'producer') throw new Error('not producer-owned');
     this.#owner = 'port';
   }
-  deliver() {
+  deliver(authority) {
+    if (authority !== PORT_AUTHORITY) throw new Error('unauthorized ownership transition');
     if (this.#owner !== 'port') throw new Error('not port-owned');
     this.#owner = 'consumer';
   }
-  drop() {
+  drop(authority) {
+    if (authority !== PORT_AUTHORITY) throw new Error('unauthorized ownership transition');
     if (this.#owner === 'dropped') throw new Error('double drop');
     if (this.#owner !== 'port') throw new Error('only port-owned values can be dropped by port');
     this.#owner = 'dropped';
@@ -65,7 +69,7 @@ export class FlowPortModel {
     if (!Number.isSafeInteger(this.nextTicket)) throw new Error('ticket budget exhausted');
     const ticket = this.nextTicket++;
     this.demand--;
-    value.deliver();
+    value.deliver(PORT_AUTHORITY);
     this.inFlight.set(ticket, {value, generation: this.generation});
     this.ready.push({ticket, value, generation: this.generation});
   }
@@ -93,7 +97,7 @@ export class FlowPortModel {
     if (value.bytes > this.maxBytes - this.chargedBytes) return {ok:false, reason:'byte_budget', value};
     const canDeliver = this.demand > 0 && this.inFlight.size < this.maxInFlight && this.queued.length === 0;
     if (!canDeliver && this.queued.length >= this.capacity) return {ok:false, reason:'full', value};
-    value.admit(); // successful admission linearization point
+    value.admit(PORT_AUTHORITY); // successful admission linearization point
     this.chargedBytes += value.bytes;
     if (canDeliver) this._deliver(value);
     else this.queued.push(value);
@@ -130,7 +134,7 @@ export class FlowPortModel {
     this.sealed = terminal;
     for (const value of this.queued) {
       this.chargedBytes -= value.bytes;
-      value.drop();
+      value.drop(PORT_AUTHORITY);
     }
     this.queued = [];
     this._terminal();
