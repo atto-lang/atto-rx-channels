@@ -8,22 +8,22 @@ def validate_cases(directory, suffixes):
         raise RuntimeError(f'test directory must be a real directory: {directory}')
     root = directory.resolve(strict=True)
 
-    def require_regular(path):
+    def require_regular(path, label):
         # A symlink can expose local files to the compiler, the runner, or logs;
         # also reject dangling symlinks and directories pretending to be files.
         if path.is_symlink() or not path.is_file() or path.resolve(strict=True).parent != root:
-            raise RuntimeError(f'fixture must be an in-tree regular file: {path}')
+            raise RuntimeError(f'{label} must be a regular file: {path}; fixture must be an in-tree regular file')
 
     cases = sorted(directory.glob('*.ores'))
     if not cases:
         raise RuntimeError(f'test inventory must not be empty: {directory}')
     for case in cases:
-        require_regular(case)
+        require_regular(case, 'test case')
         expectations = [case.with_suffix(suffix) for suffix in suffixes
                         if case.with_suffix(suffix).exists() or case.with_suffix(suffix).is_symlink()]
         if len(expectations) != 1:
             raise RuntimeError(f'exactly one expected result is required: {case}')
-        require_regular(expectations[0])
+        require_regular(expectations[0], 'expected result')
         if expectations[0].name.endswith('.err') and not expectations[0].read_text().strip():
             raise RuntimeError(f'negative expectation must not be empty: {expectations[0]}')
     admitted = {case.name for case in cases}
@@ -33,7 +33,7 @@ def validate_cases(directory, suffixes):
             if expected in seen:
                 continue
             seen.add(expected)
-            require_regular(expected)
+            require_regular(expected, 'expected result')
             if expected.name[:-len(suffix)] + '.ores' not in admitted:
                 raise RuntimeError(f'orphan expected result: {expected}')
     return cases
