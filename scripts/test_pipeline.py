@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from fixture_inventory import validate_cases
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -64,7 +65,13 @@ try:
     command = [java, '--enable-native-access=ALL-UNNAMED',
                '-Dpolyglot.engine.WarnInterpreterOnly=false', '-cp', classpath,
                'dev.oreslang.launcher.OresMain']
-    cases = [ROOT / 'examples/worker_pipeline.atto', *sorted((ROOT / 'tests/pipeline').glob('*.atto'))]
+    for folder in ['src', 'examples', 'tests', 'tests/pipeline']:
+        path = ROOT / folder
+        if path.is_symlink() or not path.is_dir():
+            raise RuntimeError(f'source directory must be real: {path}')
+    cases = []
+    for folder in ['examples', 'tests/pipeline']:
+        cases.extend(validate_cases(ROOT / folder, ('.out', '.check.err'), '.atto'))
     positives = []
     receipt['source_sha256'] = {}
     for path in [ROOT / 'src/worker_pipeline.atto', *cases]:

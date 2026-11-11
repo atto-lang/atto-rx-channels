@@ -74,7 +74,11 @@ Source proposals are reconciled as follows:
 
 The migrated `src/rx.ores` is **not certified** on the new pipeline compiler.
 Its `Subscription.cancelled = Channel.new<bool>(1)` field initializer is rejected
-by construction-effect admission. `scripts/test.py` also rejects the inherited
+by construction-effect admission. Minimal reproductions are
+[`legacy_field_initializer.atto`](repros/legacy_field_initializer.atto) and
+[`unavailable_bounded_queue.atto`](repros/unavailable_bounded_queue.atto); both
+were checked on the pipeline pin and rejected with the corresponding diagnostic.
+`scripts/test.py` also rejects the inherited
 `test_native_rx_async.ores` before compilation because it has no stdout/failure
 oracle; that fixture still calls the Future-returning sender surface superseded
 by #23. Those are concrete legacy compatibility gates, not passes or failures of

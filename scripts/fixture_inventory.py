@@ -2,7 +2,7 @@
 from pathlib import Path
 
 
-def validate_cases(directory, suffixes):
+def validate_cases(directory, suffixes, source_suffix='.ores'):
     directory = Path(directory)
     if directory.is_symlink() or not directory.is_dir():
         raise RuntimeError(f'test directory must be a real directory: {directory}')
@@ -14,7 +14,7 @@ def validate_cases(directory, suffixes):
         if path.is_symlink() or not path.is_file() or path.resolve(strict=True).parent != root:
             raise RuntimeError(f'{label} must be a regular file: {path}; fixture must be an in-tree regular file')
 
-    cases = sorted(directory.glob('*.ores'))
+    cases = sorted(directory.glob('*' + source_suffix))
     if not cases:
         raise RuntimeError(f'test inventory must not be empty: {directory}')
     for case in cases:
@@ -34,6 +34,6 @@ def validate_cases(directory, suffixes):
                 continue
             seen.add(expected)
             require_regular(expected, 'expected result')
-            if expected.name[:-len(suffix)] + '.ores' not in admitted:
+            if expected.name[:-len(suffix)] + source_suffix not in admitted:
                 raise RuntimeError(f'orphan expected result: {expected}')
     return cases

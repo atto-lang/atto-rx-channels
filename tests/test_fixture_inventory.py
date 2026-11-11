@@ -25,6 +25,17 @@ class FixtureInventoryHardeningTest(unittest.TestCase):
     def test_positive_fixture_admitted(self):
         self.assertEqual([p.name for p in self.check()], ['case.ores'])
 
+    def test_canonical_atto_inventory_uses_same_admission(self):
+        (self.folder / 'case.ores').rename(self.folder / 'case.atto')
+        self.assertEqual([p.name for p in validate_cases(self.folder, self.SUFFIXES, '.atto')],
+                         ['case.atto'])
+
+    def test_canonical_atto_symlink_is_rejected(self):
+        (self.folder / 'case.ores').rename(self.folder / 'outside.atto')
+        (self.folder / 'case.atto').symlink_to(self.folder / 'outside.atto')
+        with self.assertRaisesRegex(RuntimeError, 'regular file'):
+            validate_cases(self.folder, self.SUFFIXES, '.atto')
+
     def test_check_error_expectation_admitted(self):
         (self.folder / 'case.out').unlink()
         (self.folder / 'case.check.err').write_text('compiler rejection\n')
