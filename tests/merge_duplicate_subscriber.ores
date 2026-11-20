@@ -1,0 +1,11 @@
+import * as rx_channels from '../src/rx.ores';
+import class Observable, Subscription from '../src/rx.ores';
+pub async fnc main(): void {
+  val Channel<Option<int>> left = Channel.new<Option<int>>(1);
+  val Channel<Option<int>> right = Channel.new<Option<int>>(1);
+  val Observable<int> source = rx_channels.merge_channels(left, right);
+  val Subscription<int> first = source.subscribe();
+  val Subscription<int> second = source.subscribe();
+  stdio.println(second.next().is_none());
+  return;
+}
