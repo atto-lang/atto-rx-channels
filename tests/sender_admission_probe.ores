@@ -5,11 +5,9 @@ pub async fnc main(): void {
   val Option<int> witness = None;
   val FramedPipe<int> pipe = rx_channels.framed_pipe(2, witness);
   stdio.println(pipe.is_complete());
-  val Future<void> first = pipe.send(12);
-  await first;
+  pipe.send_blocking(12);
   stdio.println(pipe.is_complete());
-  val Future<void> done = pipe.complete();
-  await done;
+  pipe.complete_blocking();
   stdio.println(pipe.is_complete());
   val Subscription<int> sub = pipe.subscribe();
   stdio.println(sub.next().unwrap());

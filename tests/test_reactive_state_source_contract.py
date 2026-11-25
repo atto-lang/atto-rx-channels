@@ -78,10 +78,22 @@ class ReactiveStateSourceContract(unittest.TestCase):
             self.assertIn("writech self.state_busy, true;", method)
             self.assertIn("try readch self.state_busy;", method)
 
+    def test_checked_sender_exposes_only_credit_bounded_public_delivery(self):
+        source_no_comments = "\n".join(
+            line for line in self.sender.splitlines()
+            if not line.lstrip().startswith("//")
+        )
+        self.assertNotIn("pub send(T value): Future<void>", source_no_comments)
+        self.assertNotIn("pub complete(): Future<void>", source_no_comments)
+        self.assertIn("send_admitted(T value): Future<void>", source_no_comments)
+        self.assertIn("complete_admitted(): Future<void>", source_no_comments)
+        self.assertIn("pub suspends send_blocking(T value): void", source_no_comments)
+        self.assertIn("pub suspends complete_blocking(): void", source_no_comments)
+
     def test_blocking_sender_holds_one_delivery_credit_until_settlement(self):
         for start, end, operation in (
-            ("pub send_blocking(T value): void", "pub complete_blocking(): void", "self.send(value)"),
-            ("pub complete_blocking(): void", "end", "self.complete()"),
+            ("pub suspends send_blocking(T value): void", "pub suspends complete_blocking(): void", "self.send_admitted(value)"),
+            ("pub suspends complete_blocking(): void", "end", "self.complete_admitted()"),
         ):
             section = self.sender.split(start, 1)[1].split(end, 1)[0]
             acquired = section.index("readch self.delivery_credit")
@@ -93,12 +105,21 @@ class ReactiveStateSourceContract(unittest.TestCase):
     def test_sender_has_three_guarded_admission_turns(self):
         self.assertEqual(self.sender.count("readch self.admission"), 3)
         self.assertEqual(self.sender.count("writech self.admission, permit"), 3)
-        self.assertEqual(self.sender.count("finally {"), 3)
-        source_no_comments = "\n".join(
-            line for line in self.sender.splitlines()
-            if not line.lstrip().startswith("//")
+
+        # Await is required in the public *_blocking methods, but it must
+        # never occur while the admission permit itself is held. A capacity-0
+        # channel needs the consumer to run before settlement.
+        windows = re.findall(
+            r"readch self\.admission;([\s\S]*?)writech self\.admission, permit;",
+            self.sender,
         )
-        self.assertNotRegex(source_no_comments, r"\bawait\b")
+        self.assertEqual(len(windows), 3)
+        for section in windows:
+            code_only = "\n".join(
+                line for line in section.splitlines()
+                if not line.lstrip().startswith("//")
+            )
+            self.assertNotRegex(code_only, r"\bawait\b")
 
 
 if __name__ == "__main__":
