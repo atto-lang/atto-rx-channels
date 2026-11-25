@@ -70,11 +70,11 @@ export class FlowPortModel {
     const ticket = this.nextTicket++;
     this.demand--;
     value.deliver(PORT_AUTHORITY);
-    this.inFlight.set(ticket, {value, generation: this.generation});
+    this.inFlight.set(ticket, {value, generation: this.generation, observed:false});
     this.ready.push({ticket, value, generation: this.generation});
   }
   _terminal() {
-    if (this.sealed && this.queued.length === 0 && !this.terminalDelivered) {
+    if (this.sealed && this.queued.length === 0 && this.ready.length === 0 && !this.terminalDelivered) {
       // Logically terminal after all NEXT deliveries have been admitted.
       // Physical reclamation still waits for inFlight acknowledgements.
       this.terminalDelivered = true;
@@ -93,7 +93,7 @@ export class FlowPortModel {
     this._checkGeneration(generation);
     if (!(value instanceof OwnedValue) || value.owner !== 'producer') throw new TypeError('expected producer-owned value');
     if (this.sealed) return {ok:false, reason:'closed', value};
-    if (!Number.isSafeInteger(this.nextTicket)) return {ok:false, reason:'ticket_exhausted', value};
+    if (!Number.isSafeInteger(this.nextTicket) || this.queued.length > Number.MAX_SAFE_INTEGER - this.nextTicket) return {ok:false, reason:'ticket_exhausted', value};
     if (value.bytes > this.maxBytes - this.chargedBytes) return {ok:false, reason:'byte_budget', value};
     const canDeliver = this.demand > 0 && this.inFlight.size < this.maxInFlight && this.queued.length === 0;
     if (!canDeliver && this.queued.length >= this.capacity) return {ok:false, reason:'full', value};
@@ -107,12 +107,15 @@ export class FlowPortModel {
     this._checkGeneration(generation);
     const out = this.ready;
     this.ready = [];
+    for (const event of out) this.inFlight.get(event.ticket).observed = true;
+    this._terminal();
     return out;
   }
   ack(ticket, generation=this.generation) {
     this._checkGeneration(generation);
     const item = this.inFlight.get(ticket);
     if (!item || item.generation !== generation) return {ok:false, reason:'unknown_ticket'};
+    if (!item.observed) return {ok:false, reason:'not_observed'};
     this.inFlight.delete(ticket);
     this.chargedBytes -= item.value.bytes;
     this._dispatch();

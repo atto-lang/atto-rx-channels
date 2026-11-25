@@ -131,3 +131,23 @@ test('constructor and value validation fail closed', () => {
   assert.throws(()=>{v.bytes=999},/read only/);
   assert.equal(v.bytes,1);
 });
+
+
+test('unobserved NEXT cannot refund bytes or expose terminal ahead of delivery', () => {
+  const p=new FlowPortModel({capacity:0,maxBytes:1});
+  p.request(1); const v=owned('a'); assert.equal(p.offer(v).ok,true);
+  assert.equal(p.ack(1).reason,'not_observed');
+  assert.equal(p.chargedBytes,1);
+  assert.equal(p.complete().ok,true); assert.equal(p.terminal(),null);
+  const [next]=p.takeReady(); assert.equal(next.value,v);
+  assert.equal(p.terminal().kind,'complete');
+  assert.equal(p.ack(next.ticket).ok,true); assert.equal(p.quiescent,true);
+});
+
+test('ticket exhaustion reserves a ticket for each accepted queued value', () => {
+  const p=new FlowPortModel({capacity:2}); p.nextTicket=Number.MAX_SAFE_INTEGER;
+  const a=owned('a'), b=owned('b'); assert.equal(p.offer(a).ok,true);
+  assert.equal(p.offer(b).reason,'ticket_exhausted'); assert.equal(b.owner,'producer');
+  p.request(1); const [next]=p.takeReady(); assert.equal(next.ticket,Number.MAX_SAFE_INTEGER);
+  assert.equal(p.ack(next.ticket).ok,true); assert.equal(p.chargedBytes,0);
+});
