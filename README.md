@@ -1,129 +1,53 @@
-# rx-oreslang-channels
+> **AI agent instructions (organization-wide):** Before working on code, issues, or pull requests, read and follow the [organization `AGENTS.md`](https://github.com/atto-lang/.github/blob/main/AGENTS.md), including its **merge-first stealth-development policy**. Honor any repository-local `AGENTS.md`, explicit holds, and GitHub-enforced rules.
 
-A userland reactive stream library written in **Oreslang**. It uses bounded/rendezvous channels, `readch`, `nb writech`, `try` probes, dynamic `select`/`nb select`, and `await`. It follows the pointerless ownership model throughout. `src/rx.ores` is a plain file/code unit, not a synthetic package or module wrapper; callers import the file with `import * as ...` and/or select declarations by relative path. It has no dependency on `std/rx` and adds no Java reactive implementation.
+# atto-rx-channels
 
-This library lives outside core/std-lib. The core rx-ores implementation can evolve independently while this version exercises Oreslang's channel and source-frame suspension APIs.
+Reactive streams and observable adapters for AttoLang channels.
 
-## Run
+## Naming migration and language authority
 
-Install JDK 25, Maven, Python 3, and Git, and authenticate Git for the private ores-truffle-oreslang repositories, then:
+This repository is maintained at [atto-lang/atto-rx-channels](https://github.com/atto-lang/atto-rx-channels); use `https://github.com/atto-lang/atto-rx-channels.git` for Git remotes and canonical `.atto` source examples. The normative language contract is [atto-spec](https://github.com/atto-lang/atto-spec), with executable guest evidence tracked by [atto-platform-conformance](https://github.com/atto-lang/atto-platform-conformance). Follow current ownership, borrowing, effects, actor, and syntax rules there; do not infer implemented features from a README or unexecuted CI.
 
-```sh
-python3 scripts/setup.py
-source .work/env.sh
-python3 scripts/test.py
-```
+## Purpose
 
-`compiler.lock` pins the exact reference compiler revision. This branch requires the merged Future/select work plus the pointerless first-class `Fnc<T,...>` ownership convergence and the data-only Channel payload boundary: callback calls temporarily read-borrow ordinary arguments, while explicit ownership operations use the reserved `rt copy`, `rt share`, `rt borrow`, and `rt take` surface. Setup fetches the pinned commit; it does not modify your compiler checkout or `std/rx`.
+Adapters between AttoLang channels and observable/stream-style interfaces.
 
-You can also set `ORES_CLASSPATH` to an existing compatible compiler's `target/classes` plus its Maven dependency classpath. Set `JAVA` to the Java executable if necessary.
+## API and contract expectations
 
-## Channel source with async/await
+- Expose general-purpose interfaces that are usable without an Atto commercial account.
+- Document data/ownership semantics, error behavior, and supported runtimes.
+- Keep protocol and serialization details portable across relevant AttoLang backends.
 
-```ores
-import * as rx_channels from './src/rx.ores';
-import class FramedPipe, Subscription, StreamEvent from './src/rx.ores';
+## Development and testing
 
-pub async fnc main(): void {
-  // Current compiler needs a typed None witness for generic inference.
-  val Option<int> element_type = None;
-  val FramedPipe<int> pipe = rx_channels.framed_pipe(0, element_type);
-  val Future<void> producing = pipe.send(42);
-  val Subscription<int> sub = pipe.subscribe();
+Use checked-in implementation and CI for actual commands. Add behavior-focused tests, including negative cases and lifecycle edge cases; distinguish local unit tests from executed multi-backend conformance.
 
-  val StreamEvent<int> item = sub.next_event();
-  stdio.println(item.value.unwrap());
-  await producing;
+## Project status
 
-  val Future<void> finishing = pipe.complete();
-  stdio.println(sub.next_event().is_complete());
-  await finishing;
-  return;
-}
-```
+This describes intended scope, not a verified feature matrix. Consult the source tree and exact-commit CI results for implementation status.
 
-The reference compiler currently rejects generic `async fnc` declarations and async instance methods. The generic library therefore uses **ordinary methods whose source bodies suspend**. `Subscription.next()` returns `Option<T>` at the source level; call it directly inside a resumable source workflow. Internally, channel subscriptions use `nb select`, whose value form is `Future<Option<SelectResult>>`; awaiting it yields the current Ores continuation rather than parking an actor carrier. `send()` and `complete()` return real `Future<void>` registrations that callers explicitly `await`. `from_future()` adapts an existing Future. See [examples/channel_async.ores](examples/channel_async.ores) and [examples/pipeline.ores](examples/pipeline.ores).
+## Ecosystem
 
-Imports of generic functions currently use the module-qualified direct-call form. Explicit types on imported results retain useful checking across the current import boundary.
+- [AttoLang](https://github.com/atto-lang)
+- [Language specification](https://github.com/atto-lang/atto-spec)
+- [Cross-platform conformance](https://github.com/atto-lang/atto-platform-conformance)
 
-## API
+## Repository ownership and contribution routing
 
-| Operation | Behavior |
-| --- | --- |
-| `from_values(Array<T>)` | Takes ownership of its move-only array; separate cursor per subscription |
-| `from_channel(Channel<Option<T>>)` | Hot input with one consumer; no background pump |
-| `from_future(Future<T>)` | One shared Future result, then completion |
-| `map(Observable<A>, Fnc<A, B>)` | One transform per demanded item |
-| `filter(Observable<T>, Fnc<T, bool>)` | Iterative pulls until a predicate accepts; the callback receives temporary read access |
-| `take(Observable<T>, int)` | At most N items, then cancels upstream |
-| `merge_channels(left, right)` | Fair deterministic merging of two channel inputs |
-| `first(Observable<T>)` | Compatibility helper returning `Option<T>`; cancellation in `finally` |
-| `first_required(Observable<T>)` | Returns `T`, fails on empty rather than returning `None` (native Future-valued `first()` is a future integration target) |
-| `framed_pipe(capacity, typedNone)` | **Preferred:** privately owns one writer/channel and admits one subscriber |
-| `pipe.send(value)` / `pipe.complete()` | Bounded writes, rejects duplicate completion and writes after completion |
-| `pipe.subscribe()` | Claims the single subscriber; duplicate calls fail |
-| `framed_sender(Channel<Option<T>>)` | Creates checked `FramedSender<T>` for ordered terminal writes |
-| `writer.send(value)` | Rejects sends after completion; returns bounded write `Future<void>` |
-| `writer.complete()` | Claims termination exactly once and writes `None`; repeats fail |
-| `subscription.next_event()` | Returns `StreamEvent<T>` with `next`, `complete`, or `cancelled` kind |
-| `subscription.is_complete()/is_cancelled()` | Query terminal cause without conflating cancellation with normal completion |
-| `send(channel, value)` | Legacy **unchecked** raw helper; caller must uphold terminal protocol |
-| `complete(channel)` | Legacy **unchecked** raw helper; does not close the channel |
-| `observable.subscribe()` | Creates an independent subscription state |
-| `subscription.next()` | Suspends until data/completion/failure; one outstanding pull |
-| `subscription.cancel()` | Idempotent cancellation; returns true only once |
+**Belongs here:** Adapters between typed AttoLang directional channels and observable/reactive streams, delivery and subscription lifecycle.
 
-Oreslang's source ownership model is pointerless. Callback types stay ordinary, for example `Fnc<int, bool>` or `Fnc<T, bool>`; a first-class callback call receives temporary read access without encoding a C/Rust-style pointer type. If code needs a named borrow beyond one call expression it uses `rt borrow value`, not `&value`.
+**Belongs elsewhere:** Base channels and actor scheduler semantics in compiler/runtime repos; task combinators in atto-rx-tasks; stream operators in atto-rx.
 
-```ores
-val Fnc<int, bool> even = |value| -> {
-  return value % 2 == 0;
-};
-```
+**Security and portability boundary:** Preserve exactly-one-winner select, FIFO per edge, bounded buffers, cancellation rollback and critical-section nonblocking guarantees.
 
-The library and test runner reject pointer-style callback types, unary address-of borrows, and pointer declarations.
+AttoLang is the canonical project name; new source, examples and documentation use `.atto` and the `atto-lang` repository organization. This README defines scope, not feature readiness.
 
-## Stream contract
+**Acceptance:** name exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
 
-- The preferred `FramedSender<T>` transports `Some(value)` then exactly one `None`, claiming termination before submitting the terminal write. Duplicate completion and sender writes after that claim fail. Completion remains in the data FIFO and cannot overtake previously registered writes.
-- **Important ownership limit:** `FramedSender` is single-writer, task/actor-local state. It cannot enforce the protocol against code that retains and writes directly to the underlying raw Channel. The older raw `send(channel)` and `complete(channel)` functions remain for compatibility but are unchecked. A native channel-close adapter is the eventual stronger boundary.
-- A submitted completion `Future<void>` must be awaited. When capacity is zero or the queue is full, it can remain pending until a consumer receives the terminal frame.
-- Capacity zero is rendezvous; positive capacity bounds accepted writes. `send()` does not spin or drop when full. Retain and await every returned write Future to bound pending producer registrations as well as the channel buffer.
-- Pull operators have no prefetch queue. `take(0)` consumes nothing. `take(N)` cancels upstream immediately after its Nth value. Filter uses a loop rather than recursive callbacks.
-- Each channel input has one subscriber. `from_channel` and `merge_channels` now reject a second `subscribe()` on the same Observable instead of handing out competing readers; one completion frame cannot terminate multiple consumers. This is **not multicast**. Use distinct channels for fan-out. The two merge inputs must be distinct channels.
-- Merge keeps reusable FAIR select sets, removes completed inputs from selection, and finishes only when both complete. Cancellation uses a select control arm, allowing the runtime to remove losing read registrations.
-- Dynamic `select from` returns `Option<SelectResult>`; `nb select from` returns native `Future<Option<SelectResult>>`; `try select from` remains an immediate `Option<SelectResult>` probe.
-- Cancellation leaves the producer's channel open and preserves values not claimed by a winning selection. A read that already won a race may have consumed its value before cancellation.
-- For backward compatibility, `next(): Option<T>` returns `None` on both cancellation and natural completion. Prefer `next_event()` for explicit `NEXT`/`COMPLETE`/`CANCELLED` states. Failures are propagated, never encoded as `COMPLETE`. This does **not** yet replicate the native `OresFuture` cancellation state in `next()`.
-- Termination cleanup is claimed exactly once across completion, failure, and explicit cancellation. `cancel()` after natural completion returns false, and does not re-dispose a completed subscription.
-- Future sources retain the producer's lifetime. Cancelling an adapter does not cancel its shared Future; an already pending Future pull waits for settlement and then discards its value if cancelled. Channel sources are the adapter for prompt cancellation of a pending read.
-- Operator/Future failures propagate through source suspension; they are not emitted as data or mistaken for normal completion. Ordinary guest failures use `Result.expect` because this compiler has no guest `throw`/rethrow statement. `finally` clears demand and disposes upstream even when a language panic bypasses `catch`.
-- `Array<T>` is move-only on the pinned compiler. `from_values` accepts ownership of that array, so the caller must not access or mutate it after transfer. `rt copy` on move-only arrays is **not yet supported** without `Symbol.rtCopy` lowering, and must not be silently treated as a shallow alias. Replay shares the captured collection across subscriptions; nested mutable objects still require explicit safe ownership or immutability. Use channels for owned mutable payloads.
-- Channels and subscriptions stay in their execution domain. They cannot cross actor mailboxes; use ActorRef/mailbox protocols for actor-to-actor transport. Function/closure values are deliberately not channel payloads: callbacks remain local and channels carry data. Structured actor cancellation remains runtime-owned.
+## Legacy migration and verification gates
 
-This is an initial pull-oriented implementation, not complete Rx operator parity. Timed operators, multicast subjects, variadic merge, and shared-Future cancellation need additional work.
+The historical predecessor is [ores-truffle-oreslang/rx-oreslang-channels](https://github.com/ores-truffle-oreslang/rx-oreslang-channels), now archived. This repository is maintained at [atto-lang/atto-rx-channels](https://github.com/atto-lang/atto-rx-channels); do not infer an ID-preserving transfer or source parity from naming or imported history. Preserve working legacy `.ores` inputs and package/CLI aliases until their compiler-backed `.atto` replacements and consumers are verified.
 
-## Validation
+Typed reactive/channel adapters, backpressure, cancellation and ownership tests belong here; untrusted actor message internals and transferring closures across isolation boundaries do not. [atto-lang](https://github.com/atto-lang) owns language, portable libraries, compilers, tooling, tests and examples; [atto-co](https://github.com/atto-co) separately governs hosted deployment, tenant infrastructure, identity and billing. Future transfers or carve-outs require separate source/target owner authorization, independent security review and rollback ownership. Inventory exact SHA/tree, numeric ID, history, access, visibility, protections, PRs, releases, packages, consumers, Actions/runners, secrets, applications, webhooks, deploy keys and Pages. Never mirror private source without explicit authorization. Verify identity/history and restored controls after any authorized transfer, then execute exact-head tests before changing consumers. Zero-step jobs are NOT_EXECUTED; host-only checks do not establish compiled guest execution or production readiness.
 
-The test runner type/ownership-checks the library, examples, and every test program, then executes each with a timeout and checks exact output or an expected failure. Coverage includes replay and array ownership rejection, completion ordering, checked sender double-close/send-after-close rejection, natural completion vs cancellation events, cleanup-at-most-once, `first_required` on present/empty sources, operator composition, no prefetch, fair merge, rendezvous backpressure, Future adaptation, upstream failure, and invalid take counts. The existing `.github/workflows/test.yml` builds the pinned compiler and runs the suite when its `ORES_COMPILER_READ_TOKEN` read-only secret is present. Since a default `GITHUB_TOKEN` cannot check out private cross-org sources, funded-org regression runs instead mirror the *exact compiler Git tree* and this library's source/tests into the same test repository, verify compiler blob identity, and run there with no cross-org checkout secret. Local validation uses existing Git authentication.
-
-## Compiler compatibility checkpoint (2026-10-06)
-
-This repository tracks compiler PRs #398/#399/#404/#405/#406/#408/#409/#410/#411/#412 as **unmerged proposals**, without changing its stable compiler pin or API behavior. See [docs/compiler-pr-sync.md](docs/compiler-pr-sync.md) for rx-oreslang-channels-specific migration invariants, dependencies and validation gates.
-
-## Ownership and lifecycle audit (October 2026)
-
-`framed_pipe(capacity, typedNone)` is the recommended entry point when the stream owns its channel. Its transport and sender are private and it accepts only one subscriber; this eliminates external raw-write bypass of the terminal sentinel for this API. Existing `framed_sender(rawChannel)` and `from_channel(rawChannel)` remain compatibility adapters without this enforcement. All methods assume task/actor-local sequential access; the source `marked()` read/restore probe is not an atomic cross-thread peek. `Subscription.dispose_once()` is private to prevent external callers from triggering cleanup independently of terminal state. `pull()` and `dispose()` are still public override hooks pending support for protected class methods, and must not be called directly. Native `std/rx` remains the eventual authority on structured cancellation.
-
-**Generic factory note:** The pinned compiler forbids public constructors on file-private classes and explicit generic type arguments on imported function calls. For now create a typed `None` value (for example `val Option<int> witness = None;`) and call `rx_channels.framed_pipe(0, witness)`. The witness is *not* a stream value and is checked to be `None`; it only enables generic parameter inference. This avoids exposing the pipe's raw channel while respecting file-private class visibility.
-
-## Repository ownership and migration (2026-11-08)
-
-This repo is currently `ores-truffle-oreslang/rx-oreslang-channels`. The public language name is **AttoLang**; preserve `.ores` compatibility and old repo/package/CLI IDs until a separate compiler-backed and consumer-reviewed change proves replacement.
-
-- **Belongs here:** typed reactive/channel adapters, backpressure, cancellation and ownership tests.
-- **Does not belong here:** untrusted actor message internals or passing closures across isolation channels.
-- **Organization model:** [atto-lang](https://github.com/atto-lang) owns portable language libraries, compilers, tools, tests, core/std and examples. [atto-co](https://github.com/atto-co) separately owns managed hosting, tenant/deployment control, identity, billing and SaaS. Existing similarly named `atto-*` repos should be audited for overlap but are not necessarily transfers of this source identity.
-- **Initial proposed move:** this original numeric GitHub repository ID and history into `atto-lang/rx-oreslang-channels` retaining the old name. Current migration wave authorizes zero direct moves into `atto-co`. Future product carve-outs require new owner/security approval.
-
-**Safe transfer:** announce in [issue #26](https://github.com/ores-truffle-oreslang/.github/issues/26), follow [private migration draft #25](https://github.com/ores-truffle-oreslang/.github/pull/25). Record exact source SHA/tree, ID, release tags, PRs, packages, dependencies, branch/ruleset protections, target visibility and rights, Actions/runners, App/webhook permissions, secrets, Pages, rollback authority, source/target admins and independent security review. Never mirror private source without explicit authorization. After an approved GitHub ownership transfer verify unchanged ID/tree/history, restore security policy, change consumers separately and run exact-head tests with **nonzero executed steps**. `steps=[]`/`null` is `NOT_EXECUTED`; host or structural tests cannot certify AttoLang guest execution, database safety or actor parity.
+Historical planning: [coordination issue #26](https://github.com/ores-truffle-oreslang/.github/issues/26) and [migration runbook #25](https://github.com/ores-truffle-oreslang/.github/pull/25).
