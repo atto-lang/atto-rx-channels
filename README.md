@@ -22,6 +22,12 @@ Adapters between AttoLang channels and observable/stream-style interfaces.
 
 Use checked-in implementation and CI for actual commands. Add behavior-focused tests, including negative cases and lifecycle edge cases; distinguish local unit tests from executed multi-backend conformance.
 
+The [bounded guest worker pipeline](docs/worker-pipeline.md) executes on the
+explicit Java/Graal pin in `pipeline-compiler.lock`. Its [example](examples/worker_pipeline.atto)
+prints `1, 4, 9, 16, 25, 36` on separate lines, then total `91`. The implementation
+and lifecycle tests are real `.atto` guest programs. See that document for the
+reproduction command, exact evidence boundary and unresolved legacy Rx gates.
+
 ## Project status
 
 This describes intended scope, not a verified feature matrix. Consult the source tree and exact-commit CI results for implementation status.

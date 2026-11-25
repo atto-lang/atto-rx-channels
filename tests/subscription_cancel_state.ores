@@ -1,0 +1,15 @@
+import * as rx_channels from '../src/rx.ores';
+import class Observable, Subscription, StreamEvent from '../src/rx.ores';
+
+pub async fnc main(): void {
+  val Observable<int> values = rx_channels.from_values([9]);
+  val Subscription<int> sub = values.subscribe();
+  stdio.println(sub.cancel());
+  stdio.println(sub.is_cancelled());
+  stdio.println(sub.is_complete());
+  stdio.println(sub.next().is_none());
+  val StreamEvent<int> terminal = sub.next_event();
+  stdio.println(terminal.is_cancelled());
+  stdio.println(sub.cancel());
+  return;
+}
