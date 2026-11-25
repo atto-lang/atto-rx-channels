@@ -51,3 +51,11 @@ The historical predecessor is [ores-truffle-oreslang/rx-oreslang-channels](https
 Typed reactive/channel adapters, backpressure, cancellation and ownership tests belong here; untrusted actor message internals and transferring closures across isolation boundaries do not. [atto-lang](https://github.com/atto-lang) owns language, portable libraries, compilers, tooling, tests and examples; [atto-co](https://github.com/atto-co) separately governs hosted deployment, tenant infrastructure, identity and billing. Future transfers or carve-outs require separate source/target owner authorization, independent security review and rollback ownership. Inventory exact SHA/tree, numeric ID, history, access, visibility, protections, PRs, releases, packages, consumers, Actions/runners, secrets, applications, webhooks, deploy keys and Pages. Never mirror private source without explicit authorization. Verify identity/history and restored controls after any authorized transfer, then execute exact-head tests before changing consumers. Zero-step jobs are NOT_EXECUTED; host-only checks do not establish compiled guest execution or production readiness.
 
 Historical planning: [coordination issue #26](https://github.com/ores-truffle-oreslang/.github/issues/26) and [migration runbook #25](https://github.com/ores-truffle-oreslang/.github/pull/25).
+
+## Pull/push bounded-flow reference model (TARGET, not guest support)
+
+See [the pull/push reactive-admission contract](docs/PULL_PUSH_CONTRACT_V1.md) and its
+[source-free protocol model](src/flow-port-model.mjs). Run the model assertions with
+`node --test test/flow-port-model.test.mjs` (Node 20+). These tests **do not**
+certify compiled AttoLang, any runtime backend, cross-backend parity, or a
+zero-GC allocation profile. All concrete guest APIs remain unverified.
