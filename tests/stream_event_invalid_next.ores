@@ -1,7 +1,0 @@
-import class StreamEvent from '../src/rx.ores';
-pub async fnc main(): void {
-  val Option<int> absent = None;
-  val StreamEvent<int> event = new StreamEvent<int>("next", absent);
-  stdio.println(event.is_next());
-  return;
-}

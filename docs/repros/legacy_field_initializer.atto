@@ -1,5 +1,0 @@
-// Compatibility blocker for the imported Subscription<T> field layout.
-define class Marker as
-  val Channel<bool> cancelled = Channel.new<bool>(1);
-end
-pub fnc main(): void { return; }

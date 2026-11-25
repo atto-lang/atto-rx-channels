@@ -1,2 +1,0 @@
-actor fnc illegal(Fnc<int, int> callback): void { return; }
-pub fnc main(): void { return; }
