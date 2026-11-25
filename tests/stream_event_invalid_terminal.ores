@@ -1,0 +1,7 @@
+import class StreamEvent from '../src/rx.ores';
+pub async fnc main(): void {
+  val Option<int> present = Some(123);
+  val StreamEvent<int> event = new StreamEvent<int>("cancelled", present);
+  stdio.println(event.is_cancelled());
+  return;
+}

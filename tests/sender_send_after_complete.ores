@@ -1,0 +1,9 @@
+import * as rx_channels from '../src/rx.ores';
+import class FramedSender from '../src/rx.ores';
+pub async fnc main(): void {
+  val Channel<Option<int>> frames = Channel.new<Option<int>>(1);
+  val FramedSender<int> writer = rx_channels.framed_sender(frames);
+  writer.complete_blocking();
+  writer.send_blocking(17);
+  return;
+}
