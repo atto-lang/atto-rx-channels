@@ -178,6 +178,14 @@ This repository tracks compiler PRs #398/#399/#404/#405/#406/#408/#409/#410/#411
 **Generic factory note:** The pinned compiler forbids public constructors on file-private classes and explicit generic type arguments on imported function calls. For now create a typed `None` value (for example `val Option<int> witness = None;`) and call `rx_channels.framed_pipe(0, witness)`. The witness is *not* a stream value and is checked to be `None`; it only enables generic parameter inference. This avoids exposing the pipe's raw channel while respecting file-private class visibility.
 
 
+## File-root imports and transport distinction
+
+The existing file-root imports, benchmark and confined fixture inventory are retained. See [binding and local-channel contract](BINDINGS-AND-LOCAL-CHANNELS.md) for the historical proposal distinguishing local owned callable transport from serialized actor mailboxes. Current compiler-pin limitations are not a normative blanket prohibition.
+
+
+The historical native TestSuite is preserved under `docs/repros/native_rx_async_legacy.ores`. The active golden fixture now exercises raw rendezvous Future settlement, explicit completion, bounded checked sender delivery and idempotent cancellation through the current API. Its exact expected stdout consists of five `true` lines. This migration is not a guest execution claim until CI passes.
+
+
 ## Draft Option-valued filter_map
 
 `filter_map(Observable<A>, Fnc<A, Option<B>>)` is pull-driven: None skips an item, not the subscription. The adapter uses the hardened upstream `next_result()` and forwards ordinary upstream and callback errors through `pull_result()`, without a background pump or implicit Result-to-terminal conversion. Cancellation uses the existing disposal path. The compatibility `pull()` wrapper retains the same behavior as other operators. Postfix `?` in a callback exits that callback, not the subscription. No cross-domain or multicast behavior is introduced. Compiler-pinned guest execution and cancellation/error regressions are still required before claiming support.
