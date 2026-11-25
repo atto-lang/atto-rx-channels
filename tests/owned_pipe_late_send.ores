@@ -3,8 +3,7 @@ import class FramedPipe from '../src/rx.ores';
 pub async fnc main(): void {
   val Option<int> element_type = None;
   val FramedPipe<int> pipe = rx_channels.framed_pipe(1, element_type);
-  val Future<void> finished = pipe.complete();
-  await finished;
-  pipe.send(8);
+  pipe.complete_blocking();
+  pipe.send_blocking(8);
   return;
 }
