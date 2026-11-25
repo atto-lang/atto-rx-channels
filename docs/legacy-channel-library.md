@@ -178,6 +178,10 @@ This repository tracks compiler PRs #398/#399/#404/#405/#406/#408/#409/#410/#411
 **Generic factory note:** The pinned compiler forbids public constructors on file-private classes and explicit generic type arguments on imported function calls. For now create a typed `None` value (for example `val Option<int> witness = None;`) and call `rx_channels.framed_pipe(0, witness)`. The witness is *not* a stream value and is checked to be `None`; it only enables generic parameter inference. This avoids exposing the pipe's raw channel while respecting file-private class visibility.
 
 
+## File-root imports and transport distinction
+
+The existing file-root imports, benchmark and confined fixture inventory are retained. See [binding and local-channel contract](BINDINGS-AND-LOCAL-CHANNELS.md) for the historical proposal distinguishing local owned callable transport from serialized actor mailboxes. Current compiler-pin limitations are not a normative blanket prohibition.
+
 ## Draft skip operator and prototype evaluation
 
 `skip(source, count)` rejects negative counts at factory construction, consumes only on downstream demand, and preserves typed upstream failures through `next_result()`. See [prototype evaluation](PROTOTYPE_EVALUATION.md) and [historical CI receipt policy](EXACT_GITHUB_RUN_EVIDENCE_V1.md). Guest compiler execution is required; source-free receipt tests are not guest evidence. The obsolete legacy workflow is not restored.
