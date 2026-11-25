@@ -1,0 +1,5 @@
+// PR #26's factory depends on runtime types absent from the pipeline pin.
+pub fnc main(): void {
+  val BoundedQueue<int> queue = BoundedQueue.new<int>(2, 4);
+  return;
+}

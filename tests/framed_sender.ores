@@ -3,10 +3,8 @@ import class FramedSender, Observable, Subscription, StreamEvent from '../src/rx
 pub async fnc main(): void {
   val Channel<Option<int>> frames = Channel.new<Option<int>>(2);
   val FramedSender<int> writer = rx_channels.framed_sender(frames);
-  val Future<void> sent = writer.send(7);
-  await sent;
-  val Future<void> closed = writer.complete();
-  await closed;
+  writer.send_blocking(7);
+  writer.complete_blocking();
   stdio.println(writer.is_complete());
   val Observable<int> stream = rx_channels.from_channel(frames);
   val Subscription<int> sub = stream.subscribe();
