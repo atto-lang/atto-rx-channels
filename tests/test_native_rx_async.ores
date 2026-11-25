@@ -1,11 +1,12 @@
 // Standalone golden test for the current bounded sender API and rendezvous Future.
 import * as rx_channels from '../src/rx.ores';
-import class FramedPipe, Subscription, StreamEvent from '../src/rx.ores';
+import class FramedPipe, Observable, Subscription, StreamEvent from '../src/rx.ores';
 
 pub async fnc main(): void {
   val Channel<Option<int>> input = Channel.new<Option<int>>(0);
   val Future<void> sending = rx_channels.send(input, 42);
-  val Subscription<int> reader = rx_channels.from_channel(input).subscribe();
+  val Observable<int> observable = rx_channels.from_channel(input);
+  val Subscription<int> reader = observable.subscribe();
   val StreamEvent<int> value = reader.next_event();
   await sending;
   stdio.println(value.is_next() && value.value.unwrap() == 42);

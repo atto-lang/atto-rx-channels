@@ -181,3 +181,6 @@ This repository tracks compiler PRs #398/#399/#404/#405/#406/#408/#409/#410/#411
 ## File-root imports and transport distinction
 
 The existing file-root imports, benchmark and confined fixture inventory are retained. See [binding and local-channel contract](BINDINGS-AND-LOCAL-CHANNELS.md) for the historical proposal distinguishing local owned callable transport from serialized actor mailboxes. Current compiler-pin limitations are not a normative blanket prohibition.
+
+
+The historical native TestSuite is preserved under `docs/repros/native_rx_async_legacy.ores`. The active golden fixture now exercises raw rendezvous Future settlement, explicit completion, bounded checked sender delivery and idempotent cancellation through the current API. Its exact expected stdout consists of five `true` lines. This migration is not a guest execution claim until CI passes.
