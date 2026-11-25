@@ -682,6 +682,10 @@ define class TakeObservable<T> extends Observable<T> as
   val Observable<T> source;
   val int count;
   constructor(Observable<T> source, int count) {
+    if count < 0; then
+      val Result<bool, String> failure = Err("take count must be nonnegative");
+      failure.expect("rx_channels.take");
+    fi
     self.source = source;
     self.count = count;
   }
@@ -856,6 +860,75 @@ pub fnc first_result<T>(Observable<T> source): Result<Option<T>, Object> {
   } finally {
     sub.cancel();
   }
+}
+
+define class SkipSubscription<T> extends Subscription<T> as
+  val Subscription<T> upstream;
+  val Channel<int> remaining = Channel.new<int>(1);
+
+  constructor(Subscription<T> upstream, int count) {
+    if count < 0; then
+      val Result<bool, String> failure = Err("skip count must be nonnegative");
+      failure.expect("rx_channels.skip");
+    fi
+    self.upstream = upstream;
+    writech self.remaining, count;
+  }
+
+  pub pull_result(): Result<Option<T>, Object> {
+    let int missing = readch self.remaining;
+    loop {
+      if missing == 0; then
+        writech self.remaining, 0;
+        return self.upstream.next_result();
+      fi
+      val Result<Option<T>, Object> outcome = self.upstream.next_result();
+      match outcome
+        Ok(frame) -> {
+          if frame.is_none(); then
+            writech self.remaining, 0;
+            return Ok(None);
+          fi
+          missing = missing - 1;
+        }
+        Err(err) -> {
+          writech self.remaining, missing;
+          return Err(err);
+        }
+      end
+    }
+  }
+
+  pub pull(): Option<T> {
+    return self.pull_result().expect("rx_channels.SkipSubscription.pull");
+  }
+
+  pub dispose(): void {
+    self.upstream.cancel();
+    return;
+  }
+end
+
+define class SkipObservable<T> extends Observable<T> as
+  val Observable<T> source;
+  val int count;
+
+  constructor(Observable<T> source, int count) {
+    if count < 0; then
+      val Result<bool, String> failure = Err("skip count must be nonnegative");
+      failure.expect("rx_channels.skip");
+    fi
+    self.source = source;
+    self.count = count;
+  }
+
+  pub subscribe(): Subscription<T> {
+    return new SkipSubscription<T>(self.source.subscribe(), self.count);
+  }
+end
+
+pub fnc skip<T>(Observable<T> source, int count): Observable<T> {
+  return new SkipObservable<T>(source, count);
 }
 
 pub fnc first<T>(Observable<T> source): Option<T> {
