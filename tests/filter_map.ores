@@ -1,0 +1,25 @@
+import * as rx_channels from '../src/rx.ores';
+import class Observable, Subscription from '../src/rx.ores';
+
+pub async fnc main(): void {
+  val Observable<int> source = rx_channels.from_values([1, 2, 3, 4]);
+  val Fnc<int, Option<int>> twice_even = |int n| -> {
+    if n % 2 == 0; then
+      return Some(n * 10);
+    fi
+    return None;
+  };
+  val Observable<int> filtered = rx_channels.filter_map(source, twice_even);
+  val Subscription<int> sub = filtered.subscribe();
+  stdio.println(sub.next().unwrap());
+  stdio.println(sub.next().unwrap());
+  stdio.println(sub.next().is_none());
+  stdio.println(sub.cancel());
+
+  val Observable<int> absent = rx_channels.filter_map(
+    rx_channels.from_values([1, 3, 5]), twice_even);
+  val Subscription<int> empty = absent.subscribe();
+  stdio.println(empty.next().is_none());
+  stdio.println(empty.cancel());
+  return;
+}
