@@ -37,7 +37,10 @@ class CompilerSetupTests(unittest.TestCase):
             'with open(os.environ["MVN_LOG"],"a") as f: f.write(json.dumps(sys.argv[1:])+"\\n")\n'
             'if os.environ.get("FAIL_MVN"): sys.exit(19)\n'
             'for arg in sys.argv[1:]:\n'
-            ' if arg.startswith("-Dmdep.outputFile="): pathlib.Path(arg.split("=",1)[1]).write_text("fixture-dependency.jar")\n')
+            ' if arg.startswith("-Dmdep.outputFile="):\n'
+            '  path=pathlib.Path(arg.split("=",1)[1])\n'
+            '  if os.environ.get("POISON_CLASSPATH"): path.symlink_to(os.environ["POISON_CLASSPATH"])\n'
+            '  else: path.write_text("fixture-dependency.jar")\n')
         fake.chmod(0o700)
         self.env = dict(os.environ, PATH=str(self.bin)+os.pathsep+os.environ['PATH'], MVN_LOG=str(self.log))
     def git(self, *args):
@@ -92,5 +95,61 @@ class CompilerSetupTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('must not be a symlink', result.stderr)
         self.assertFalse(self.log.exists())
+
+
+    def test_symlinked_work_root_refused_before_clone_or_build(self):
+        work = self.root / '.work'
+        actual = self.root / 'moved-work'
+        work.rename(actual)
+        work.symlink_to(actual, target_is_directory=True)
+        result = self.run_setup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('work directory must be a real directory', result.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_symlinked_classpath_refused_before_build(self):
+        outside = self.root / 'outside.txt'
+        outside.write_text('must remain unchanged')
+        (self.root / '.work/classpath.txt').symlink_to(outside)
+        result = self.run_setup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('classpath must be a regular file', result.stderr)
+        self.assertEqual(outside.read_text(), 'must remain unchanged')
+        self.assertFalse(self.log.exists())
+
+    def test_classpath_directory_masquerade_refused_before_build(self):
+        (self.root / '.work/classpath.txt').mkdir()
+        result = self.run_setup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('classpath must be a regular file', result.stderr)
+        self.assertFalse(self.log.exists())
+
+
+    def test_post_build_classpath_symlink_refused_before_publish(self):
+        outside = self.root / 'outside-classpath.txt'
+        outside.write_text('trusted sentinel')
+        self.env['POISON_CLASSPATH'] = str(outside)
+        result = self.run_setup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('classpath must be a regular file after build', result.stderr)
+        self.assertEqual(outside.read_text(), 'trusted sentinel')
+        self.assertFalse((self.root / '.work/env.sh').exists())
+
+    def test_preexisting_launcher_symlink_not_followed(self):
+        outside = self.root / 'outside-launcher.txt'
+        outside.write_text('trusted sentinel')
+        launcher = self.root / '.work/env.sh'
+        launcher.symlink_to(outside)
+        result = self.run_setup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(outside.read_text(), 'trusted sentinel')
+        self.assertFalse(launcher.is_symlink())
+        self.assertTrue(launcher.read_text().startswith('export ORES_CLASSPATH='))
+
+    def test_launcher_temporary_name_uses_exclusive_random_creation(self):
+        setup = (self.root / 'scripts/setup.py').read_text()
+        self.assertIn('tempfile.NamedTemporaryFile(', setup)
+        self.assertIn('delete=False', setup)
+        self.assertNotIn('os.getpid()', setup)
 
 if __name__ == '__main__': unittest.main()

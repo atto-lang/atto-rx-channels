@@ -1,0 +1,26 @@
+import * as rx_channels from '../src/rx.ores';
+import class Observable, Subscription from '../src/rx.ores';
+
+async fnc pending(Channel<int> input): int {
+  return await (nb readch input);
+}
+
+pub async fnc main(): void {
+  val Channel<int> input = Channel.new<int>(1);
+  val Future<int> shared = pending(input);
+  val Observable<int> source = rx_channels.from_future(shared);
+  val Subscription<int> sub = source.subscribe();
+
+  stdio.println(sub.cancel());
+
+  // pull_result is a public override hook only because protected methods are
+  // not available yet. This fixture deliberately exercises the internal
+  // FutureSubscription stop-vs-Future select after cancel() signalled stop.
+  val Result<Option<int>, Object> stopped = sub.pull_result();
+  stdio.println(stopped.is_ok());
+  stdio.println(stopped.unwrap().is_none());
+
+  writech input, 88;
+  stdio.println(await shared);
+  return;
+}

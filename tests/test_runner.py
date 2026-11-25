@@ -85,5 +85,101 @@ class RunnerInventory(unittest.TestCase):
         self.rejected('negative expectation must not be empty')
 
 
+    def test_symlinked_source_rejected_before_compiler(self):
+        self.seed()
+        outside = self.root/'untrusted.ores'
+        outside.write_text('untrusted source')
+        case = self.root/'tests/case.ores'
+        case.unlink()
+        case.symlink_to(outside)
+        self.rejected('in-tree regular file')
+
+    def test_symlinked_expectation_rejected_before_compiler(self):
+        self.seed()
+        outside = self.root/'untrusted.out'
+        outside.write_text('hello\\n')
+        expected = self.root/'tests/case.out'
+        expected.unlink()
+        expected.symlink_to(outside)
+        self.rejected('in-tree regular file')
+
+    def test_dangling_expectation_rejected_before_compiler(self):
+        self.seed()
+        expected = self.root/'tests/case.out'
+        expected.unlink()
+        expected.symlink_to(self.root/'missing.out')
+        self.rejected('in-tree regular file')
+
+    def test_expected_directory_rejected_before_compiler(self):
+        self.seed()
+        expected = self.root/'tests/case.out'
+        expected.unlink()
+        expected.mkdir()
+        self.rejected('in-tree regular file')
+
+    def test_symlinked_suite_root_rejected_before_compiler(self):
+        self.seed()
+        original = self.root/'tests'
+        actual = self.root/'actual-tests'
+        original.rename(actual)
+        original.symlink_to(actual, target_is_directory=True)
+        self.rejected('test directory must be a real directory')
+
+    def test_symlinked_callback_rejection_rejected_before_compiler(self):
+        if not CALLBACK:
+            self.skipTest('separate reject suite is callback-only')
+        self.seed()
+        outside = self.root/'untrusted.err'
+        outside.write_text('expected rejection')
+        expected = self.root/'tests/reject/case.err'
+        expected.unlink()
+        expected.symlink_to(outside)
+        self.rejected('in-tree regular file')
+
+
+    def test_symlinked_library_source_rejected_before_compiler(self):
+        self.seed()
+        outside = self.root / 'outside.ores'
+        outside.write_text('not a trusted source')
+        library = self.root / 'src/rx.ores'
+        library.unlink()
+        library.symlink_to(outside)
+        self.rejected('source must be an in-tree regular file')
+
+    def test_symlinked_benchmark_source_rejected_before_compiler(self):
+        self.seed()
+        outside = self.root / 'outside.ores'
+        outside.write_text('not a trusted benchmark')
+        bench = self.root / 'bench'
+        bench.mkdir()
+        (bench / 'sample.ores').symlink_to(outside)
+        self.rejected('source must be an in-tree regular file')
+
+    def test_symlinked_source_directory_rejected_before_compiler(self):
+        self.seed()
+        src = self.root / 'src'
+        moved = self.root / 'moved-src'
+        src.rename(moved)
+        src.symlink_to(moved, target_is_directory=True)
+        self.rejected('source directory must be a real directory')
+
+    def test_benchmark_directory_masquerade_rejected_before_compiler(self):
+        self.seed()
+        (self.root / 'bench').write_text('not a directory')
+        self.rejected('source directory must be a real directory')
+
+    def test_symlinked_example_rejected_before_compiler(self):
+        if not CHANNELS:
+            self.skipTest('only the channels runner checks example sources')
+        self.seed()
+        outside = self.root / 'outside.ores'
+        outside.write_text('untrusted example')
+        example_dir = self.root / 'examples'
+        example_dir.mkdir()
+        (example_dir / 'demo.ores').symlink_to(outside)
+        self.rejected('source must be an in-tree regular file')
+
+
+
 if __name__=='__main__':
     unittest.main()

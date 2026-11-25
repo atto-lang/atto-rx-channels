@@ -1,0 +1,6 @@
+import * as pipeline from '../../src/worker_pipeline.atto';
+pub async fnc main(): void {
+  val Future<int> finished = pipeline.run_pipeline(128, false);
+  stdio.println(await finished);
+  return;
+}

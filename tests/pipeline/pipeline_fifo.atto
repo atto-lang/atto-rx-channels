@@ -1,0 +1,30 @@
+import * as pipeline from '../../src/worker_pipeline.atto';
+pub async fnc main(): void {
+  val Channel<int> jobs = Channel.new<int>(1);
+  val Channel<int> results = Channel.new<int>(1);
+  val Channel<bool> cleaned = Channel.new<bool>(1);
+  val Channel<bool> stopped = Channel.new<bool>(1);
+  writech jobs, 0;
+  val Future<void> first = pipeline.produce(jobs, 0, 0);
+  val Future<void> second = pipeline.produce(jobs, 1, 0);
+  stdio.println(readch jobs);
+  await first;
+  stdio.println(readch jobs);
+  await second;
+  stdio.println(readch jobs);
+  // Both arms ready: cancellation has explicit priority over write admission.
+  writech stopped, true;
+  val Future<Option<SelectResult>> offered = pipeline.offer(jobs, stopped, 99);
+  val Option<SelectResult> winner = await offered;
+  stdio.println(winner.unwrap().index);
+  stdio.println((try readch jobs).is_none());
+  val Future<Option<SelectResult>> committed = pipeline.offer(jobs, stopped, 42);
+  val Option<SelectResult> committed_winner = await committed;
+  writech stopped, true;
+  stdio.println(committed_winner.unwrap().index);
+  stdio.println(readch jobs);
+  stdio.println(pipeline.shutdown(cleaned, jobs, results));
+  stopped.close();
+  cleaned.close();
+  return;
+}
