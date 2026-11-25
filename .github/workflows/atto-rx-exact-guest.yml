@@ -1,7 +1,7 @@
 name: Atto RX exact-head guest validation
 on:
   push:
-    branches: [ci/atto-rx-five-heads-20261125]
+    branches: [ci/atto-rx-guest-retry-20261125]
 permissions:
   contents: read
 jobs:
@@ -14,20 +14,20 @@ jobs:
       matrix:
         include:
           - pr: 9
-            head: 'd2975a26d877fd078481c044ba6ba46d6ec9e9fd'
-            tree: '5e5a1812b775bd02deb2c58b626dfa0c7549f094'
+            head: '5c71342b8d450d79c5e8b1975008a06347cb11a7'
+            tree: '42c24841bf55beb95c53b9c8d89e181770d6477a'
           - pr: 10
-            head: '62dd0dd58049cfaed418a2c217529202423696e9'
-            tree: 'd0c10c0b5ad913f40b8060b5fde0e492fecf2877'
+            head: 'ec39cf2fb044816b9e50fc874181ef49b17be855'
+            tree: 'f0979252ab5a7546a0262dead68171cccb7faea6'
           - pr: 11
-            head: '7b87cb87d8a0ff0ad790d7769ce18d062677e8ee'
-            tree: '65b2b6589a6007a6abb2536c67431c6fa01c39d1'
+            head: '4769b88d95b834fa85769ac720968497f3714f0a'
+            tree: '61bcebdcb7abddb44ff1487f6e0f21c246791870'
           - pr: 13
-            head: '1f01531cacbe36dc04f4ac4d5746765ee4fb18c7'
-            tree: 'ad326bbb625e28cc458e5d2097733fa53713e36b'
+            head: 'be56f5e0ecdab81bc5383ade4c1f2fc58bb08234'
+            tree: 'e8bd31ee9eeef9a6fb4ae793a7e0b86bb0530ff3'
           - pr: 16
-            head: '5cd5b00e554c008b4ebe09932429a147bf4fda28'
-            tree: '6b4b3a63eb55f2751486b6650e3a7849d1ebc4a3'
+            head: 'e57fa7fc76cad7c1e973b1f78cb63a41d869fed3'
+            tree: '1802f059ba6b6477839780c876f93e018d970f1f'
     steps:
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
