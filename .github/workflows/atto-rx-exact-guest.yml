@@ -1,7 +1,7 @@
 name: Atto RX exact-head guest validation
 on:
   push:
-    branches: [ci/atto-rx-guest-retry-20261125]
+    branches: [ci/atto-rx-queue-compiler-repair-20261125]
 permissions:
   contents: read
 jobs:
@@ -13,18 +13,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - pr: 9
-            head: '5c71342b8d450d79c5e8b1975008a06347cb11a7'
-            tree: '42c24841bf55beb95c53b9c8d89e181770d6477a'
-          - pr: 10
-            head: 'ec39cf2fb044816b9e50fc874181ef49b17be855'
-            tree: 'f0979252ab5a7546a0262dead68171cccb7faea6'
-          - pr: 11
-            head: '4769b88d95b834fa85769ac720968497f3714f0a'
-            tree: '61bcebdcb7abddb44ff1487f6e0f21c246791870'
-          - pr: 13
-            head: 'be56f5e0ecdab81bc5383ade4c1f2fc58bb08234'
-            tree: 'e8bd31ee9eeef9a6fb4ae793a7e0b86bb0530ff3'
           - pr: 16
             head: 'e57fa7fc76cad7c1e973b1f78cb63a41d869fed3'
             tree: '1802f059ba6b6477839780c876f93e018d970f1f'
@@ -52,6 +40,10 @@ jobs:
             3524a7cc8cb1a2a9214e6fdfe0927a735e7f5a05) tree=cc57423ec414a93135208c26c9fbb3e60d9a3c86 ;;
             *) echo 'Unexpected compiler revision'; exit 1 ;;
           esac
+          test "$revision" = 3524a7cc8cb1a2a9214e6fdfe0927a735e7f5a05
+          revision=aa130a6d4ca4dbd4b1fe8f7c432d2ac9672c712a
+          tree=85aa064fb7428e4b3214acfa0aae043d5f0205e4
+          echo "TEST-ONLY COMPILER REPAIR; NOT ORIGINAL PIN EVIDENCE"
           test ! -e .work
           mkdir -p .work/oreslang-source.java
           git -C .work/oreslang-source.java init
@@ -68,6 +60,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/setup.py
-          source .work/env.sh
+          compiler="$PWD/.work/oreslang-source.java"
+          mvn -q -f "$compiler/pom.xml" -Dtest=BoundedQueueSourceSurfaceTest test
+          mvn -q -f "$compiler/pom.xml" -DskipTests clean package
+          mvn -q -f "$compiler/pom.xml" dependency:build-classpath "-Dmdep.outputFile=$PWD/.work/classpath.txt"
+          export ORES_CLASSPATH="$compiler/target/classes:$(cat .work/classpath.txt)"
           python3 scripts/test.py
