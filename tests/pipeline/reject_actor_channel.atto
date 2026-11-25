@@ -1,0 +1,2 @@
+actor fnc illegal(Channel<int> live): void { return; }
+pub fnc main(): void { return; }

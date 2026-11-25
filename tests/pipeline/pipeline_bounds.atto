@@ -1,0 +1,22 @@
+import * as pipeline from '../../src/worker_pipeline.atto';
+pub async fnc main(): void {
+  val Channel<int> jobs = Channel.new<int>(1);
+  val Channel<int> results = Channel.new<int>(1);
+  val Channel<bool> cleaned = Channel.new<bool>(1);
+  val Future<void> first = pipeline.produce(jobs, 0, 0);
+  val Future<void> second = pipeline.produce(jobs, 1, 0);
+  // The host probe observes the real coordinator at these two paused points.
+  stdio.println("jobs full");
+  val Future<void> worker_a = pipeline.work(readch jobs, results);
+  val Future<void> worker_b = pipeline.work(readch jobs, results);
+  stdio.println("results full");
+  await first;
+  await second;
+  stdio.println(readch results);
+  stdio.println(readch results);
+  await worker_a;
+  await worker_b;
+  stdio.println(pipeline.shutdown(cleaned, jobs, results));
+  cleaned.close();
+  return;
+}

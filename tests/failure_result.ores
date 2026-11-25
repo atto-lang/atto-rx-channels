@@ -1,0 +1,48 @@
+import * as rx_channels from '../src/rx.ores';
+import class Observable, Subscription, StreamEvent from '../src/rx.ores';
+
+define class BrokenSubscription extends Subscription<int> as
+  pub pull_result(): Result<Option<int>, Object> {
+    return Err("boom");
+  }
+end
+
+define class BrokenObservable extends Observable<int> as
+  pub subscribe(): Subscription<int> {
+    return new BrokenSubscription();
+  }
+end
+
+pub async fnc main(): void {
+  val Subscription<int> direct = new BrokenSubscription();
+  val Result<Option<int>, Object> first = direct.next_result();
+  stdio.println(first.is_err());
+  stdio.println(direct.is_failed());
+  stdio.println(direct.is_complete());
+  stdio.println(direct.is_cancelled());
+  stdio.println(direct.cancel());
+
+  val Result<Option<int>, Object> second = direct.next_result();
+  stdio.println(second.is_err());
+
+  val Result<StreamEvent<int>, Object> event = direct.next_event_result();
+  stdio.println(event.is_err());
+
+  val Observable<int> source = new BrokenObservable();
+  val Fnc<int, int> twice = |x| -> { return x * 2; };
+  val Observable<int> mapped = rx_channels.map(source, twice);
+  val Subscription<int> mapped_sub = mapped.subscribe();
+  stdio.println(mapped_sub.next_result().is_err());
+
+  val Fnc<int, bool> positive = |x| -> { return x > 0; };
+  val Observable<int> filtered = rx_channels.filter(new BrokenObservable(), positive);
+  stdio.println(filtered.subscribe().next_result().is_err());
+
+  val Observable<int> taken = rx_channels.take(new BrokenObservable(), 1);
+  stdio.println(taken.subscribe().next_result().is_err());
+
+  val Result<Option<int>, Object> first_result =
+      rx_channels.first_result(new BrokenObservable());
+  stdio.println(first_result.is_err());
+  return;
+}
