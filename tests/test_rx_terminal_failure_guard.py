@@ -84,6 +84,24 @@ class SubscriptionFailureAdmission(unittest.TestCase):
         self.assertIn("self.next_signal()", legacy)
         self.assertNotIn("self.next_result()", legacy)
 
+    def test_late_failure_must_not_override_an_existing_terminal_winner(self):
+        text = SOURCE.read_text(encoding="utf-8")
+        subscription = text.split("define class Subscription<T> as", 1)[1].split(
+            "define class Observable<T> as", 1
+        )[0]
+        next_method = subscription.split(
+            "pub next_result(): Result<Option<T>, Object>", 1
+        )[1].split("pub next(): Option<T>", 1)[0]
+
+        self.assertGreaterEqual(next_method.count("val bool failed_now = self.claim_failed();"), 2)
+        self.assertGreaterEqual(next_method.count("if !failed_now; then"), 2)
+        self.assertGreaterEqual(next_method.count("return Ok(None);"), 2)
+        self.assertLess(
+            next_method.index("val bool failed_now = self.claim_failed();"),
+            next_method.index("return Err(err);"),
+            "ordinary upstream error may be returned only after winning FAILED"
+        )
+
     def test_failure_status_is_never_natural_complete(self):
         text = SOURCE.read_text(encoding="utf-8")
         subscription = text.split("define class Subscription<T> as", 1)[1].split(
