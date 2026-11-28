@@ -65,3 +65,7 @@ See [the pull/push reactive-admission contract](docs/PULL_PUSH_CONTRACT_V1.md) a
 `node --test test/flow-port-model.test.mjs` (Node 20+). These tests **do not**
 certify compiled AttoLang, any runtime backend, cross-backend parity, or a
 zero-GC allocation profile. All concrete guest APIs remain unverified.
+
+## Draft bounded queue tickets
+
+See [the bounded queue contract](docs/bounded_queue_v1.md) and its [conformance vectors](conformance/bounded_queue_v1.json). This draft changes the legacy compiler pin; the complete legacy suite and the queue lifecycle fixtures must be executed on that pin before promotion. The separate worker-pipeline compiler pin remains unchanged.

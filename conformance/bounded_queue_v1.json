@@ -1,0 +1,171 @@
+{
+  "schema": "oreslang.bounded_queue.v1",
+  "semantics": {
+    "transport": "compiler/runtime-owned BoundedQueue<T> using canonical bounded channel waiter/admission coordinator",
+    "ticket": "one-shot generation-bound local cancellation capability",
+    "push_linearization": [
+      "ticket cancellation may win only before write commit",
+      "actual item-channel close terminally settles an uncommitted write",
+      "write commit permanently admits the payload"
+    ],
+    "ownership": "only admitted consumes payload permanently; every non-admitted terminal outcome returns the exact original payload through QueuePush<T>.take_value()",
+    "receive": "committed FIFO values drain before #closed_drained",
+    "close": "idempotent actual-channel close; no consumable synthetic close token",
+    "fairness": "inherits canonical channel registration order; no second waiter queue"
+  },
+  "scenarios": [
+    {
+      "id": "full_returns_payload",
+      "capacity": 1,
+      "actions": [
+        "push:owned-0:t0",
+        "try_push:owned-1:t1"
+      ],
+      "outcomes": [
+        "#admitted",
+        "#full:return-exact-owned-1"
+      ]
+    },
+    {
+      "id": "cancel_before_ready_write_returns_payload",
+      "capacity": 1,
+      "actions": [
+        "push:owned-0:t0",
+        "pending_push:owned-1:t1",
+        "cancel:t1"
+      ],
+      "outcomes": [
+        "#admitted",
+        "pending",
+        "true",
+        "#cancelled:return-exact-owned-1"
+      ]
+    },
+    {
+      "id": "ticket_is_one_shot",
+      "capacity": 2,
+      "actions": [
+        "try_push:1:t1",
+        "try_push:2:t1"
+      ],
+      "outcomes": [
+        "#admitted",
+        "#ticket_used:return-exact-2"
+      ]
+    },
+    {
+      "id": "close_invalidates_unclaimed_ticket_and_drains",
+      "capacity": 2,
+      "actions": [
+        "try_push:1:t1",
+        "ticket:stale",
+        "close",
+        "try_push:2:stale",
+        "pop",
+        "pop"
+      ],
+      "outcomes": [
+        "#admitted",
+        "ticket:stale",
+        "true",
+        "#stale_ticket:return-exact-2",
+        "value:1",
+        "#closed_drained"
+      ]
+    },
+    {
+      "id": "live_pending_writers_fifo",
+      "capacity": 1,
+      "actions": [
+        "push:0:t0",
+        "pending_push:1:t1",
+        "pending_push:2:t2",
+        "pop",
+        "await:t1",
+        "pop",
+        "await:t2",
+        "pop"
+      ],
+      "outcomes": [
+        "#admitted",
+        "pending",
+        "pending",
+        "value:0",
+        "#admitted",
+        "value:1",
+        "#admitted",
+        "value:2"
+      ],
+      "required_runtime_test": true
+    },
+    {
+      "id": "older_cancelled_waiter_does_not_block_later_waiter",
+      "capacity": 1,
+      "actions": [
+        "push:0:t0",
+        "pending_push:1:t1",
+        "pending_push:2:t2",
+        "cancel:t1",
+        "pop",
+        "await:t1",
+        "await:t2",
+        "pop"
+      ],
+      "outcomes": [
+        "#admitted",
+        "pending",
+        "pending",
+        "true",
+        "value:0",
+        "#cancelled:return-exact-1",
+        "#admitted",
+        "value:2"
+      ],
+      "required_runtime_test": true
+    },
+    {
+      "id": "close_settles_pending_and_returns_payload",
+      "capacity": 1,
+      "actions": [
+        "push:0:t0",
+        "pending_push:1:t1",
+        "close",
+        "await:t1",
+        "pop",
+        "pop"
+      ],
+      "outcomes": [
+        "#admitted",
+        "pending",
+        "true",
+        "#closed:return-exact-1",
+        "value:0",
+        "#closed_drained"
+      ],
+      "required_runtime_test": true
+    },
+    {
+      "id": "waiter_budget_returns_payload",
+      "capacity": 1,
+      "actions": [
+        "push:0:t0",
+        "pending_push:1:t1",
+        "pending_push:2:t2@budget-exhausted"
+      ],
+      "outcomes": [
+        "#admitted",
+        "pending",
+        "#resource_limit:return-exact-2"
+      ],
+      "required_runtime_test": true
+    }
+  ],
+  "backends": [
+    "java",
+    "llvm",
+    "net",
+    "wasm",
+    "forge"
+  ],
+  "evidence_rule": "Each backend executes independently; runtime substrate, source lowering, ownership recovery, and guest execution are separate gates; zero-step CI is NOT_EXECUTED."
+}

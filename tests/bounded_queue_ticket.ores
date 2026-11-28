@@ -1,0 +1,50 @@
+pub async fnc main(): void {
+  val BoundedQueue<int> queue = BoundedQueue.new<int>(2, 4);
+
+  val QueuePush<int> first =
+      queue.try_push(11, queue.new_ticket());
+  stdio.println(first.status);
+
+  val QueuePush<int> second =
+      queue.try_push(22, queue.new_ticket());
+  stdio.println(second.status);
+
+  val QueuePush<int> full =
+      queue.try_push(33, queue.new_ticket());
+  stdio.println(full.status);
+  stdio.println(full.take_value().unwrap());
+
+  val QueuePop<int> first_pop = queue.try_pop();
+  stdio.println(first_pop.take_value().unwrap());
+
+  val QueueTicket cancelled_ticket = queue.new_ticket();
+  stdio.println(cancelled_ticket.cancel());
+  val QueuePush<int> cancelled =
+      queue.try_push(33, cancelled_ticket);
+  stdio.println(cancelled.status);
+  stdio.println(cancelled.take_value().unwrap());
+
+  val QueueTicket third_ticket = queue.new_ticket();
+  val QueuePush<int> third = queue.try_push(33, third_ticket);
+  stdio.println(third.status);
+
+  val QueuePush<int> reused = queue.try_push(44, third_ticket);
+  stdio.println(reused.status);
+  stdio.println(reused.take_value().unwrap());
+  stdio.println(third_ticket.cancel());
+
+  stdio.println(queue.try_pop().take_value().unwrap());
+  stdio.println(queue.try_pop().take_value().unwrap());
+
+  val QueueTicket stale_ticket = queue.new_ticket();
+  stdio.println(queue.close());
+  stdio.println(queue.close());
+
+  val QueuePush<int> stale = queue.try_push(44, stale_ticket);
+  stdio.println(stale.status);
+  stdio.println(stale.take_value().unwrap());
+
+  val QueuePop<int> drained = queue.try_pop();
+  stdio.println(drained.status);
+  return;
+}

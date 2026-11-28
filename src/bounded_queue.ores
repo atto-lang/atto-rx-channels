@@ -1,0 +1,15 @@
+// Package-level factory for the compiler/runtime-owned BoundedQueue<T>.
+//
+// BoundedQueue<T>, QueueTicket, QueuePush<T>, and QueuePop<T> are first-class
+// execution-domain-local capabilities supplied by the Oreslang runtime.
+// This package does not wrap Channel<T>, maintain a second waiter list, or
+// duplicate queue state.
+//
+// A failed push returns ownership through QueuePush<T>.take_value(); only
+// #admitted permanently transfers the payload into the queue.
+pub fnc bounded_queue<T>(
+    int capacity,
+    int max_pending
+): BoundedQueue<T> {
+  return BoundedQueue.new<T>(capacity, max_pending);
+}
