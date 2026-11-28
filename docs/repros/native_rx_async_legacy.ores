@@ -1,0 +1,55 @@
+// Native guest Rx Channel/select and Future/await TestSuite.
+// Reproducible without a virtual timer: rendezvous supply is an actual Future.
+import * as rx_channels from '../src/rx.ores';
+import class FramedPipe, Subscription, StreamEvent from '../src/rx.ores';
+import class TestCase, TestSuite, TestOptions, TestOutcome, RunSummary from "ores.std/testing";
+import fnc expect_true, run_suite, require_success from "ores.std/testing";
+
+fnc rendezvous_send_and_await_produces_one_value(): TestOutcome {
+  val Option<int> typed_none = None;
+  val FramedPipe<int> pipe = rx_channels.framed_pipe(0, typed_none);
+  val Future<void> sending = pipe.send(42);
+  let Subscription<int> sub = pipe.subscribe();
+  val StreamEvent<int> value = sub.next_event();
+  await sending;
+  val bool good = value.is_next() && value.value.unwrap() == 42;
+  sub.cancel();
+  return expect_true(good, "rendezvous Future was not delivered before await returned");
+}
+
+fnc completion_is_a_distinct_terminal_event(): TestOutcome {
+  val Option<int> typed_none = None;
+  val FramedPipe<int> pipe = rx_channels.framed_pipe(0, typed_none);
+  let Subscription<int> sub = pipe.subscribe();
+  val Future<void> sending = pipe.send(7);
+  val StreamEvent<int> first = sub.next_event();
+  await sending;
+  val Future<void> closing = pipe.complete();
+  val StreamEvent<int> done_event = sub.next_event();
+  await closing;
+  val bool good = first.is_next() && first.value.unwrap() == 7
+    && done_event.is_complete() && sub.is_complete() && !sub.is_cancelled();
+  return expect_true(good, "completion must not be conflated with cancellation");
+}
+
+fnc cancelled_subscriber_releases_demand_once(): TestOutcome {
+  val Option<int> typed_none = None;
+  val FramedPipe<int> pipe = rx_channels.framed_pipe(1, typed_none);
+  let Subscription<int> sub = pipe.subscribe();
+  val bool first = sub.cancel();
+  val bool second = sub.cancel();
+  return expect_true(first && !second && sub.is_cancelled(),
+    "cancellation must be idempotent and explicit");
+}
+
+pub routine main(): void {
+  val TestSuite suite = new TestSuite("rx-channels", arr[
+    new TestCase("rendezvous_send_and_await_produces_one_value", rendezvous_send_and_await_produces_one_value, false, ""),
+    new TestCase("completion_is_a_distinct_terminal_event", completion_is_a_distinct_terminal_event, false, ""),
+    new TestCase("cancelled_subscriber_releases_demand_once", cancelled_subscriber_releases_demand_once, false, "")
+  ]);
+  val TestOptions options = new TestOptions("", false, true);
+  val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
+  require_success(rt borrow summary);
+  return;
+}

@@ -1,0 +1,19 @@
+import * as Observable from '../src/rx.ores';
+
+pub async fnc main(): void {
+  val Channel<String> input = Channel.new<String>(2);
+  writech input, "one";
+  writech input, "two";
+  input.close();
+
+  val source = Observable.from_ch(input);
+  val sub = source.subscribe();
+  val Option<String> first = sub.next();
+  val Option<String> second = sub.next();
+  val Option<String> end = sub.next();
+  stdio.println(first.unwrap());
+  stdio.println(second.unwrap());
+  stdio.println(end.is_none());
+  sub.cancel();
+  return;
+}

@@ -1,55 +1,31 @@
-// Native guest Rx Channel/select and Future/await TestSuite.
-// Reproducible without a virtual timer: rendezvous supply is an actual Future.
+// Standalone golden test for the current bounded sender API and rendezvous Future.
 import * as rx_channels from '../src/rx.ores';
-import class FramedPipe, Subscription, StreamEvent from '../src/rx.ores';
-import class TestCase, TestSuite, TestOptions, TestOutcome, RunSummary from "ores.std/testing";
-import fnc expect_true, run_suite, require_success from "ores.std/testing";
+import class FramedPipe, Observable, Subscription, StreamEvent from '../src/rx.ores';
 
-fnc rendezvous_send_and_await_produces_one_value(): TestOutcome {
-  val Option<int> typed_none = None;
-  val FramedPipe<int> pipe = rx_channels.framed_pipe(0, typed_none);
-  val Future<void> sending = pipe.send(42);
-  let Subscription<int> sub = pipe.subscribe();
-  val StreamEvent<int> value = sub.next_event();
+pub async fnc main(): void {
+  val Channel<Option<int>> input = Channel.new<Option<int>>(0);
+  val Future<void> sending = rx_channels.send(input, 42);
+  val Observable<int> observable = rx_channels.from_channel(input);
+  val Subscription<int> reader = observable.subscribe();
+  val StreamEvent<int> value = reader.next_event();
   await sending;
-  val bool good = value.is_next() && value.value.unwrap() == 42;
-  sub.cancel();
-  return expect_true(good, "rendezvous Future was not delivered before await returned");
-}
+  stdio.println(value.is_next() && value.value.unwrap() == 42);
+  val Future<void> finishing = rx_channels.complete(input);
+  val StreamEvent<int> done_event = reader.next_event();
+  await finishing;
+  stdio.println(done_event.is_complete() && reader.is_complete() && !reader.is_cancelled());
 
-fnc completion_is_a_distinct_terminal_event(): TestOutcome {
-  val Option<int> typed_none = None;
-  val FramedPipe<int> pipe = rx_channels.framed_pipe(0, typed_none);
-  let Subscription<int> sub = pipe.subscribe();
-  val Future<void> sending = pipe.send(7);
-  val StreamEvent<int> first = sub.next_event();
-  await sending;
-  val Future<void> closing = pipe.complete();
-  val StreamEvent<int> done_event = sub.next_event();
-  await closing;
-  val bool good = first.is_next() && first.value.unwrap() == 7
-    && done_event.is_complete() && sub.is_complete() && !sub.is_cancelled();
-  return expect_true(good, "completion must not be conflated with cancellation");
-}
-
-fnc cancelled_subscriber_releases_demand_once(): TestOutcome {
   val Option<int> typed_none = None;
   val FramedPipe<int> pipe = rx_channels.framed_pipe(1, typed_none);
-  let Subscription<int> sub = pipe.subscribe();
-  val bool first = sub.cancel();
-  val bool second = sub.cancel();
-  return expect_true(first && !second && sub.is_cancelled(),
-    "cancellation must be idempotent and explicit");
-}
-
-pub routine main(): void {
-  val TestSuite suite = new TestSuite("rx-channels", arr[
-    new TestCase("rendezvous_send_and_await_produces_one_value", rendezvous_send_and_await_produces_one_value, false, ""),
-    new TestCase("completion_is_a_distinct_terminal_event", completion_is_a_distinct_terminal_event, false, ""),
-    new TestCase("cancelled_subscriber_releases_demand_once", cancelled_subscriber_releases_demand_once, false, "")
-  ]);
-  val TestOptions options = new TestOptions("", false, true);
-  val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
-  require_success(rt borrow summary);
+  val Subscription<int> sub = pipe.subscribe();
+  pipe.send_blocking(7);
+  stdio.println(sub.next().unwrap() == 7);
+  pipe.complete_blocking();
+  stdio.println(sub.next_event().is_complete());
+  val FramedPipe<int> other = rx_channels.framed_pipe(1, typed_none);
+  val Subscription<int> cancelled = other.subscribe();
+  val bool first = cancelled.cancel();
+  val bool second = cancelled.cancel();
+  stdio.println(first && !second && cancelled.is_cancelled());
   return;
 }

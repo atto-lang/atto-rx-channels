@@ -378,6 +378,71 @@ define class ValuesSubscription<T> extends Subscription<T> as
   }
 end
 
+define class RawChannelObservable<T> extends Observable<T> as
+  val Channel<T> input;
+  val Channel<bool> subscribed = Channel.new<bool>(1);
+
+  constructor(Channel<T> input) { self.input = input; }
+
+  pub subscribe(): Subscription<T> {
+    if !(try writech self.subscribed, true); then
+      val Result<bool, String> failure = Err("raw channel observable supports one subscriber");
+      failure.expect("rx_channels.RawChannelObservable.subscribe");
+    fi
+    return new RawChannelSubscription<T>(self.input);
+  }
+end
+
+define class RawChannelSubscription<T> extends Subscription<T> as
+  val Channel<T> input;
+  val Channel<bool> stopped = Channel.new<bool>(1);
+  val SelectSet cases;
+
+  constructor(Channel<T> input) {
+    self.input = input;
+    self.cases = SelectSet.new([SelectCase.read(self.stopped), SelectCase.read(input)]);
+  }
+
+  pub pull_result(): Result<Option<T>, Object> {
+    // The first select arm wins cancellation without consuming stdin.
+    try {
+      val Option<SelectResult> selected_option = await (nb select first from self.cases);
+      if selected_option.is_none(); then
+        return Ok(None);
+      fi
+      val SelectResult selected = selected_option.unwrap();
+      if selected.index == 0; then
+        return Ok(None);
+      fi
+      val T value = selected.value;
+      return Ok(Some(value));
+    } catch (err) {
+      // Channel close is the raw channel's terminal frame; all other
+      // transport errors remain failures rather than fabricated completion.
+      if self.input.is_closed_normally(); then
+        return Ok(None);
+      fi
+      return Err(err);
+    }
+  }
+
+  pub pull(): Option<T> {
+    return self.pull_result().expect("raw channel source failed");
+  }
+
+  pub dispose(): void {
+    try writech self.stopped, true;
+    return;
+  }
+end
+
+// Import this file as a namespace named Observable for the API spelling
+// Observable.from_ch(input). It is a userland module-qualified function,
+// not a compiler-provided Java host factory or a static class method.
+pub fnc from_ch<T>(Channel<T> input): Observable<T> {
+  return new RawChannelObservable<T>(input);
+}
+
 pub fnc from_channel<T>(Channel<Option<T>> input): Observable<T> {
   return new ChannelObservable<T>(input);
 }

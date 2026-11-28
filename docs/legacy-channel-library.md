@@ -181,3 +181,11 @@ This repository tracks compiler PRs #398/#399/#404/#405/#406/#408/#409/#410/#411
 ## File-root imports and transport distinction
 
 The existing file-root imports, benchmark and confined fixture inventory are retained. See [binding and local-channel contract](BINDINGS-AND-LOCAL-CHANNELS.md) for the historical proposal distinguishing local owned callable transport from serialized actor mailboxes. Current compiler-pin limitations are not a normative blanket prohibition.
+
+
+The historical native TestSuite is preserved under `docs/repros/native_rx_async_legacy.ores`. The active golden fixture now exercises raw rendezvous Future settlement, explicit completion, bounded checked sender delivery and idempotent cancellation through the current API. Its exact expected stdout consists of five `true` lines. This migration is not a guest execution claim until CI passes.
+
+
+## Draft raw-channel adapter
+
+`Observable.from_ch(input)` is the namespace-qualified factory for a raw `Channel<T>`, not a static class method. It permits one subscriber per adapter; distinct adapters over one channel compete for reads, not broadcast. The adapter never closes producer-owned stdin on cancellation. Normal EOF is distinct from typed transport failure via `pull_result()` and `is_closed_normally()`. The compiler must supply the normal-close predicate and process-owned stdin aliases. Exact guest checks for normal and caused close, pending cancellation, and subscriber admission remain mandatory.
