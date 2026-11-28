@@ -56,7 +56,8 @@ def run(args):
 
 TESTS = validate_cases(ROOT / 'tests', ('.out', '.err', '.check.err'))
 assert_pointerless()
-run(['--check', str(ROOT / 'src/rx.ores')])
+for source in checked_sources(ROOT / 'src'):
+    run(['--check', str(source)])
 for example in checked_sources(ROOT / 'examples'):
     run(['--check', str(example)])
 failures = []

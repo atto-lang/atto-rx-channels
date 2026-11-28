@@ -65,3 +65,7 @@ See [the pull/push reactive-admission contract](docs/PULL_PUSH_CONTRACT_V1.md) a
 `node --test test/flow-port-model.test.mjs` (Node 20+). These tests **do not**
 certify compiled AttoLang, any runtime backend, cross-backend parity, or a
 zero-GC allocation profile. All concrete guest APIs remain unverified.
+
+## Draft credit-gated typed stream
+
+See [the credit stream experiment](docs/credit-stream-v1.md). It is a same-domain, explicit-credit transport with a typed terminal signal. The guest fixtures and host model remain experimental; this branch does not establish compiler-backed runtime or backend parity.

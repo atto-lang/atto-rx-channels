@@ -1,0 +1,290 @@
+// Experimental, credit-gated, single-producer/unicast typed reactive transport.
+// This source is stacked on rx.ores hardening but remains an opt-in candidate.
+//
+// Public closed signal:
+//   Ok(Some(value))  => NEXT(value)
+//   Ok(None)         => COMPLETE
+//   Err(None)        => CANCELLED
+//   Err(Some(error)) => ERROR(error)
+//
+// T=Option<U> and T=Result<U,E2> remain ordinary data inside Ok(Some(T)).
+// No string discriminator, no implicit conversion of throw/raise/panic into E.
+
+// Marker inspection is destructive read/restore and is therefore valid ONLY
+// while CreditPipe.state_busy serializes every competing observation/claim.
+fnc credit_marked(Channel<bool> marker): bool {
+  val Option<bool> present = try readch marker;
+  if present.is_some(); then
+    try writech marker, true;
+    return true;
+  fi
+  return false;
+}
+
+define pub class CreditPipe<T, E> as
+  // Producer frame is three-way: NEXT / COMPLETE / explicit typed ERROR.
+  // Consumer cancellation is an out-of-band private control signal and becomes
+  // Err(None) only at the public next_signal() boundary.
+  val Channel<Result<Option<T>, E>> frames;
+
+  val Channel<bool> state_busy = Channel.new<bool>(1);
+  val Channel<bool> subscribed = Channel.new<bool>(1);
+  val Channel<bool> requested = Channel.new<bool>(1);
+  val Channel<bool> demand = Channel.new<bool>(1);
+  val Channel<bool> reading = Channel.new<bool>(1);
+  val Channel<bool> writing = Channel.new<bool>(1);
+  val Channel<bool> producer_terminal = Channel.new<bool>(1);
+  val Channel<bool> consumer_terminal = Channel.new<bool>(1);
+  val Channel<bool> cancelled = Channel.new<bool>(1);
+
+  val Channel<bool> stop_writer = Channel.new<bool>(1);
+  val Channel<bool> stop_reader = Channel.new<bool>(1);
+
+  constructor(int capacity) {
+    if capacity < 0; then
+      val Result<bool, String> fail = Err("stream capacity must be nonnegative");
+      fail.expect("CreditPipe.new");
+    fi
+    self.frames = Channel.new<Result<Option<T>, E>>(capacity);
+  }
+
+  // One reader only. The state permit is short and never spans suspension.
+  pub subscribe(): bool {
+    writech self.state_busy, true;
+    try {
+      if credit_marked(self.subscribed); then
+        return false;
+      fi
+      return try writech self.subscribed, true;
+    } finally {
+      try readch self.state_busy;
+    }
+  }
+
+  // Exactly one demand credit may be outstanding.
+  pub request(): bool {
+    writech self.state_busy, true;
+    try {
+      if !credit_marked(self.subscribed) ||
+         credit_marked(self.cancelled) ||
+         credit_marked(self.consumer_terminal) ||
+         credit_marked(self.requested); then
+        return false;
+      fi
+      if !(try writech self.requested, true); then
+        return false;
+      fi
+      if !(try writech self.demand, true); then
+        try readch self.requested;
+        return false;
+      fi
+      return true;
+    } finally {
+      try readch self.state_busy;
+    }
+  }
+
+  // One outstanding pull. No state permit is held across the registered select.
+  pub next_signal(): Result<Option<T>, Option<E>> {
+    writech self.state_busy, true;
+    try {
+      if !credit_marked(self.requested); then
+        val Result<bool, String> fail = Err("next_signal requires request()");
+        fail.expect("CreditPipe.next_signal");
+      fi
+      if !(try writech self.reading, true); then
+        val Result<bool, String> fail =
+            Err("only one outstanding next_signal is allowed");
+        fail.expect("CreditPipe.next_signal");
+      fi
+    } finally {
+      try readch self.state_busy;
+    }
+
+    try {
+      val SelectSet cases = SelectSet.new([
+        SelectCase.read(self.stop_reader),
+        SelectCase.read(self.frames)
+      ]);
+      val Option<SelectResult> selection =
+          await (nb select first from cases);
+
+      if selection.is_none(); then
+        return Err(None);
+      fi
+      val SelectResult selected = selection.unwrap();
+      if selected.index == 0; then
+        return Err(None);
+      fi
+
+      val Result<Option<T>, E> frame = selected.value;
+
+      // Cancellation may win after the frame select committed. The frame may
+      // already be consumed, but no NEXT/terminal frame is delivered after a
+      // committed consumer cancellation.
+      writech self.state_busy, true;
+      try {
+        if credit_marked(self.cancelled); then
+          return Err(None);
+        fi
+        match frame
+          Ok(value) -> {
+            if value.is_none(); then
+              try writech self.consumer_terminal, true;
+            fi
+            return Ok(value);
+          }
+          Err(error) -> {
+            try writech self.consumer_terminal, true;
+            return Err(Some(error));
+          }
+        end
+      } finally {
+        try readch self.state_busy;
+      }
+    } finally {
+      // Release one demand/pull/write slot after delivery, cancellation, or
+      // exceptional unwind. Immediate probes make cleanup idempotent.
+      writech self.state_busy, true;
+      try {
+        try readch self.requested;
+        try readch self.writing;
+        try readch self.reading;
+      } finally {
+        try readch self.state_busy;
+      }
+    }
+  }
+
+  // Register one publication using the already-issued demand credit.
+  // The returned Future settles to index 1 if the frame write wins, index 0 if
+  // consumer cancellation wins. No producer callback is run inline here.
+  publish(
+      Result<Option<T>, E> frame,
+      bool terminal
+  ): Future<Option<SelectResult>> {
+    writech self.state_busy, true;
+    try {
+      if credit_marked(self.cancelled); then
+        val Result<bool, String> fail = Err("publisher is cancelled");
+        fail.expect("CreditPipe.publish");
+      fi
+      if credit_marked(self.producer_terminal); then
+        if terminal; then
+          val Result<bool, String> fail = Err("duplicate producer terminal");
+          fail.expect("CreditPipe.publish");
+        fi
+        val Result<bool, String> fail = Err("send after terminal");
+        fail.expect("CreditPipe.publish");
+      fi
+      if credit_marked(self.writing); then
+        val Result<bool, String> fail =
+            Err("only one outstanding producer event allowed");
+        fail.expect("CreditPipe.publish");
+      fi
+
+      val Option<bool> permit = try readch self.demand;
+      if permit.is_none(); then
+        val Result<bool, String> fail = Err("event requires request() credit");
+        fail.expect("CreditPipe.publish");
+      fi
+
+      if terminal; then
+        if !(try writech self.producer_terminal, true); then
+          val Result<bool, String> fail = Err("duplicate producer terminal");
+          fail.expect("CreditPipe.publish");
+        fi
+      fi
+      if !(try writech self.writing, true); then
+        val Result<bool, String> fail =
+            Err("only one outstanding producer event allowed");
+        fail.expect("CreditPipe.publish");
+      fi
+    } finally {
+      try readch self.state_busy;
+    }
+
+    val SelectSet publication = SelectSet.new([
+      SelectCase.read(self.stop_writer),
+      SelectCase.write(self.frames, frame)
+    ]);
+    return nb select first from publication;
+  }
+
+  pub send(T value): Future<Option<SelectResult>> {
+    val Result<Option<T>, E> payload = Ok(Some(value));
+    return self.publish(payload, false);
+  }
+
+  pub complete(): Future<Option<SelectResult>> {
+    val Option<T> absent = None;
+    val Result<Option<T>, E> payload = Ok(absent);
+    return self.publish(payload, true);
+  }
+
+  pub fail(E error): Future<Option<SelectResult>> {
+    val Result<Option<T>, E> payload = Err(error);
+    return self.publish(payload, true);
+  }
+
+  // Cancel this consumer only. Producer-owned Futures/actors are never revoked.
+  pub cancel(): bool {
+    writech self.state_busy, true;
+    let bool claimed = false;
+    try {
+      if credit_marked(self.cancelled) ||
+         credit_marked(self.consumer_terminal); then
+        return false;
+      fi
+      claimed = try writech self.cancelled, true;
+      if claimed; then
+        // Revoke unused producer demand immediately, but keep the outstanding
+        // request claim until next_signal() consumes the CANCELLED outcome.
+        try readch self.demand;
+        try readch self.writing;
+      fi
+    } finally {
+      try readch self.state_busy;
+    }
+
+    if claimed; then
+      try writech self.stop_writer, true;
+      try writech self.stop_reader, true;
+    fi
+    return claimed;
+  }
+
+  pub is_cancelled(): bool {
+    writech self.state_busy, true;
+    try {
+      return credit_marked(self.cancelled);
+    } finally {
+      try readch self.state_busy;
+    }
+  }
+
+  pub is_terminal(): bool {
+    writech self.state_busy, true;
+    try {
+      return credit_marked(self.cancelled) ||
+          credit_marked(self.consumer_terminal);
+    } finally {
+      try readch self.state_busy;
+    }
+  }
+end
+
+// Typed None witnesses avoid relying on incomplete imported generic return
+// inference. They are type witnesses, never stream values.
+pub fnc credit_pipe<T, E>(
+    int capacity,
+    Option<T> value_witness,
+    Option<E> error_witness
+): CreditPipe<T, E> {
+  if value_witness.is_some() || error_witness.is_some(); then
+    val Result<bool, String> fail =
+        Err("credit_pipe witnesses must be None");
+    fail.expect("credit_pipe");
+  fi
+  return new CreditPipe<T, E>(capacity);
+}
